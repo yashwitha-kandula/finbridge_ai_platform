@@ -1,0 +1,4 @@
+dataset,rows,columns,missing_values,duplicate_rows,infinite_values,model_features,target_present,user_id_present,leakage_feature_present
+train,700,30,0,0,0,29,True,False,False
+validation,150,30,0,0,0,29,True,False,False
+test,150,30,0,0,0,29,True,False,False

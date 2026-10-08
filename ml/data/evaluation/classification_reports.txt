@@ -1,0 +1,22 @@
+RANDOM FOREST
+                     precision    recall  f1-score   support
+
+    HIGHLY_VARIABLE       0.88      0.99      0.93        70
+MODERATELY_VARIABLE       0.94      0.83      0.88        53
+             STABLE       1.00      0.93      0.96        27
+
+           accuracy                           0.92       150
+          macro avg       0.94      0.91      0.92       150
+       weighted avg       0.92      0.92      0.92       150
+
+
+LOGISTIC REGRESSION
+                     precision    recall  f1-score   support
+
+    HIGHLY_VARIABLE       0.87      0.99      0.93        70
+MODERATELY_VARIABLE       0.96      0.81      0.88        53
+             STABLE       1.00      0.96      0.98        27
+
+           accuracy                           0.92       150
+          macro avg       0.94      0.92      0.93       150
+       weighted avg       0.93      0.92      0.92       150

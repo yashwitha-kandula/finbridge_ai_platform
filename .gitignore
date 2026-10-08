@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Frontend build artefacts
+frontend/node_modules/
+frontend/dist/
+
+# Very large datasets (keep locally, do not push to GitHub)
+*.parquet
+*.csv

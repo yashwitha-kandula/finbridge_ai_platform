@@ -1,0 +1,3 @@
+model,accuracy,precision,recall,weighted_f1
+Tuned Logistic Regression,0.98,0.9810714285714285,0.98,0.9801157179185492
+Tuned Random Forest,0.92,0.9220336555674902,0.92,0.919544825306308

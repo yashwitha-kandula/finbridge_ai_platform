@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Single source of global style. No unlayered resets: Tailwind's own
+   preflight handles resets, so utility classes (padding, margin) always win. */
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --color-navy: #0b1b3d;
+  --color-navy-light: #14295a;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #ffffff;
+  color: #0f172a;
+}
