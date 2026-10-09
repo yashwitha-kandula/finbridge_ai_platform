@@ -90,8 +90,10 @@ export default function Login() {
       // Only allow digits and a leading plus sign, max 15 chars
       value = value.replace(/[^0-9+]/g, '')
       if (value.length > 15) value = value.slice(0, 15)
-    } else if (name === 'fullName' && value.length > 50) {
-      value = value.slice(0, 50)
+    } else if (name === 'fullName') {
+      // Strictly strings: letters, spaces, hyphens, and apostrophes only (no numbers)
+      value = value.replace(/[^A-Za-z\s'-]/g, '')
+      if (value.length > 50) value = value.slice(0, 50)
     } else if (name === 'email' && value.length > 100) {
       value = value.slice(0, 100)
     } else if ((name === 'password' || name === 'confirm') && value.length > 128) {
