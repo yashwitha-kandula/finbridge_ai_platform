@@ -82,11 +82,26 @@ export default function Login() {
   if (token) return <Navigate to="/" replace />
 
   const set = (e) => {
-    const { name, value, type, checked } = e.target
+    const { name, type, checked } = e.target
+    let value = e.target.value
+
+    // Limit length and restrict datatypes
+    if (name === 'mobile') {
+      // Only allow digits and a leading plus sign, max 15 chars
+      value = value.replace(/[^0-9+]/g, '')
+      if (value.length > 15) value = value.slice(0, 15)
+    } else if (name === 'fullName' && value.length > 50) {
+      value = value.slice(0, 50)
+    } else if (name === 'email' && value.length > 100) {
+      value = value.slice(0, 100)
+    } else if ((name === 'password' || name === 'confirm') && value.length > 128) {
+      value = value.slice(0, 128)
+    }
+
     setF((p) => ({ ...p, [name]: type === 'checkbox' ? checked : value }))
     setError('')
   }
-  const switchMode = (m) => { setMode(m); setError('') }
+  const switchMode = (m) => { setMode(m); setError(''); setF(initial) }
 
   const submit = async (e) => {
     e.preventDefault()
@@ -203,30 +218,30 @@ export default function Login() {
           ) : (
             <div className="grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2">
               <Field label="Full Name" icon="user">
-                <input name="fullName" value={f.fullName} onChange={set}
+                <input name="fullName" value={f.fullName} onChange={set} maxLength={50}
                        placeholder="Arjun Kumar" autoComplete="name" className={inputCls} />
               </Field>
               <Field label="Mobile Number" icon="phone">
-                <input type="tel" name="mobile" value={f.mobile} onChange={set}
+                <input type="tel" name="mobile" value={f.mobile} onChange={set} maxLength={15}
                        placeholder="+91 98765 43210" autoComplete="tel" className={inputCls} />
               </Field>
 
               <Field label="Email Address" icon="mail">
-                <input type="email" name="email" value={f.email} onChange={set}
+                <input type="email" name="email" value={f.email} onChange={set} maxLength={100}
                        placeholder="arjun.kumar@gmail.com" autoComplete="email" className={inputCls} />
               </Field>
               <Select label="Preferred Language" icon="globe" name="language"
                       value={f.language} onChange={set} options={LANGUAGES} />
 
               <Field label="Password" icon="lock">
-                <input type="password" name="password" value={f.password} onChange={set}
+                <input type="password" name="password" value={f.password} onChange={set} maxLength={128}
                        placeholder="Create a password" autoComplete="new-password" className={inputCls} />
               </Field>
               <Select label="Country" icon="flag" name="country"
                       value={f.country} onChange={set} options={COUNTRIES} />
 
               <Field label="Confirm Password" icon="lock">
-                <input type="password" name="confirm" value={f.confirm} onChange={set}
+                <input type="password" name="confirm" value={f.confirm} onChange={set} maxLength={128}
                        placeholder="Re-enter your password" autoComplete="new-password" className={inputCls} />
               </Field>
               <Select label="Currency" icon="rupee" name="currency"
