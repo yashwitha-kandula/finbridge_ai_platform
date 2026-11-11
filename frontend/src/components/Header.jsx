@@ -25,6 +25,17 @@ export default function Header({ onMenu }) {
   const [bellOpen, setBellOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [avatar, setAvatar] = useState(() => localStorage.getItem('finbridge_avatar'))
+
+  useEffect(() => {
+    const fn = () => setAvatar(localStorage.getItem('finbridge_avatar'))
+    window.addEventListener('storage', fn)
+    window.addEventListener('finbridge_avatar_updated', fn)
+    return () => {
+      window.removeEventListener('storage', fn)
+      window.removeEventListener('finbridge_avatar_updated', fn)
+    }
+  }, [])
 
   useClickOutside(bellRef, () => setBellOpen(false))
   useClickOutside(profileRef, () => setProfileOpen(false))
@@ -144,9 +155,13 @@ export default function Header({ onMenu }) {
               onClick={() => setProfileOpen((v) => !v)}
               className="flex items-center gap-2.5 rounded-xl p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 font-bold text-white shadow-sm">
-                {initials(name)}
-              </div>
+              {avatar ? (
+                <img src={avatar} alt="Profile" className="h-9 w-9 rounded-full object-cover shadow-sm ring-2 ring-indigo-500/20" />
+              ) : (
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 font-bold text-white shadow-sm">
+                  {initials(name)}
+                </div>
+              )}
               <div className="hidden text-left sm:block">
                 <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">{name}</div>
                 <div className="text-[10px] text-slate-400 leading-tight">{profession || 'Member'}</div>

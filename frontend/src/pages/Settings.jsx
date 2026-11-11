@@ -1,19 +1,38 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   User, Building2, Sliders, Bell, Shield, Lock, Smartphone, Monitor, History,
   Check, Eye, EyeOff, Plus, ChevronRight, AlertCircle, RefreshCw, Moon, Sun, Laptop,
-  CheckCircle2, X
+  CheckCircle2, X, Camera, Mail, Sparkles, Key, Bot, ExternalLink
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../theme/ThemeProvider'
 import { authFetch } from '../lib/api'
+import { COUNTRIES } from '../lib/countries'
 
 export default function Settings() {
-  const { token, user, refreshUser } = useAuth()
+  const { token, setToken, user, refreshUser, logout } = useAuth()
+  const navigate = useNavigate()
+  const fileInputRef = useRef(null)
   const { theme, setTheme } = useTheme()
   const [activeTab, setActiveTab] = useState('Profile')
   const [toast, setToast] = useState('')
   const [saving, setSaving] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('finbridge_avatar') || '')
+
+  // Change Email Modal State
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [newEmailInput, setNewEmailInput] = useState('')
+  const [changingEmail, setChangingEmail] = useState(false)
+
+  // Listen to external avatar changes
+  useEffect(() => {
+    const onAvatarUpdate = () => {
+      setAvatarUrl(localStorage.getItem('finbridge_avatar') || '')
+    }
+    window.addEventListener('finbridge_avatar_updated', onAvatarUpdate)
+    return () => window.removeEventListener('finbridge_avatar_updated', onAvatarUpdate)
+  }, [])
 
   // Tab 1: Profile State
   const [profile, setProfile] = useState({
@@ -102,6 +121,108 @@ export default function Settings() {
     setTimeout(() => setToast(''), 3500)
   }
 
+  // Gemini API Key State
+  const [geminiKeyInput, setGeminiKeyInput] = useState('')
+  const [geminiConfig, setGeminiConfig] = useState({ configured: false, masked_key: null, model: 'gemini-1.5-flash' })
+  const [testingGemini, setTestingGemini] = useState(false)
+  const [geminiTestOutput, setGeminiTestOutput] = useState('')
+
+  useEffect(() => {
+    fetch('http://localhost:8000/api/ai/key-status')
+      .then(r => r.json())
+      .then(d => { if (d) setGeminiConfig(d) })
+      .catch(() => {})
+  }, [])
+
+  const handleSaveGeminiKey = async (e) => {
+    e.preventDefault()
+    if (!geminiKeyInput.trim() || geminiKeyInput.trim().length < 20) {
+      return showToast('Please enter a valid Google Gemini API Key (starts with AIza...)')
+    }
+    try {
+      const res = await fetch('http://localhost:8000/api/ai/save-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: geminiKeyInput.trim() })
+      })
+      const d = await res.json()
+      if (d.success) {
+        setGeminiConfig({ configured: true, masked_key: d.masked_key, model: 'gemini-1.5-flash' })
+        setGeminiKeyInput('')
+        showToast('Google Gemini API Key connected successfully!')
+      } else {
+        showToast(d.message || 'Failed to save key')
+      }
+    } catch (err) {
+      showToast('Could not reach backend to save key.')
+    }
+  }
+
+  const handleTestGemini = async () => {
+    setTestingGemini(true)
+    setGeminiTestOutput('')
+    try {
+      const res = await fetch('http://localhost:8000/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: 'Introduce yourself in one sentence and explain how you help with my financial budget.',
+          context: { user_name: profile.fullName || 'User', total_income: 75000, total_expense: 40000, savings_rate: 46 }
+        })
+      })
+      const data = await res.json()
+      setGeminiTestOutput(`[${data.source || 'AI'}]: ${data.answer}`)
+    } catch {
+      setGeminiTestOutput('Error testing Gemini AI. Make sure backend is running on port 8000.')
+    } finally {
+      setTestingGemini(false)
+    }
+  }
+
+  // Handle Photo Upload
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) return showToast('Image size should be less than 2MB')
+    const reader = new FileReader()
+    reader.onload = () => {
+      const base64 = reader.result
+      setAvatarUrl(base64)
+      localStorage.setItem('finbridge_avatar', base64)
+      window.dispatchEvent(new Event('finbridge_avatar_updated'))
+      showToast('Profile photo updated successfully!')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // Handle Change Email
+  const handleChangeEmail = async (e) => {
+    e.preventDefault()
+    const emailToSet = newEmailInput.trim().toLowerCase()
+    if (!emailToSet || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToSet)) {
+      return showToast('Please enter a valid email address')
+    }
+    setChangingEmail(true)
+    try {
+      const res = await authFetch(token, '/api/auth/change-email', {
+        method: 'POST',
+        body: JSON.stringify({ new_email: emailToSet })
+      })
+      if (res.access_token) {
+        setToken(res.access_token)
+      }
+      setProfile((prev) => ({ ...prev, email: emailToSet }))
+      if (refreshUser) await refreshUser()
+      setShowEmailModal(false)
+      setNewEmailInput('')
+      showToast('Email address updated successfully!')
+    } catch (err) {
+      showToast(err.message || 'Failed to update email address')
+    } finally {
+      setChangingEmail(false)
+    }
+  }
+
   // Handle Real Profile Save to Backend Database
   const handleSaveProfile = async (e) => {
     e.preventDefault()
@@ -118,6 +239,8 @@ export default function Settings() {
           preferred_language: profile.language
         })
       })
+      localStorage.setItem('finbridge_language', profile.language)
+      window.dispatchEvent(new Event('finbridge_language_changed'))
       if (refreshUser) await refreshUser()
       showToast('Profile updated and saved to database!')
     } catch (err) {
@@ -127,15 +250,17 @@ export default function Settings() {
     }
   }
 
-  // Handle Add Account
+  // Handle Add Account (Bank & Account No. are optional)
   const handleAddAccount = (e) => {
     e.preventDefault()
-    if (!newAcc.accNum || newAcc.accNum.length < 4) return showToast('Please enter at least 4 digits')
+    const bankName = newAcc.bank.trim() || 'Connected Bank'
+    const cleanNum = newAcc.accNum ? newAcc.accNum.replace(/\D/g, '') : ''
+    const accDisplay = cleanNum.length >= 4 ? `•••• ${cleanNum.slice(-4)}` : '•••• 0000'
     const created = {
       id: Date.now(),
-      bank: newAcc.bank,
-      accNum: `•••• ${newAcc.accNum.slice(-4)}`,
-      type: newAcc.type,
+      bank: bankName,
+      accNum: accDisplay,
+      type: newAcc.type || 'Savings Account',
       synced: 'Just now',
       status: 'Connected',
       color: 'bg-emerald-600'
@@ -179,6 +304,7 @@ export default function Settings() {
     { id: 'Profile', label: 'Profile', icon: User },
     { id: 'Accounts', label: 'Accounts', icon: Building2 },
     { id: 'Preferences', label: 'Preferences', icon: Sliders },
+    { id: 'AIAssistant', label: 'AI & Gemini', icon: Sparkles },
     { id: 'Notifications', label: 'Notifications', icon: Bell },
     { id: 'Security', label: 'Security', icon: Shield },
   ]
@@ -187,9 +313,64 @@ export default function Settings() {
     <div className="mx-auto max-w-[1400px] space-y-6 pb-12 fade-in">
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed right-6 top-20 z-50 flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-xl dark:bg-white dark:text-slate-900">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400 dark:text-emerald-600" />
-          {toast}
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-slate-700/20 bg-slate-900/90 px-5 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur-md dark:border-white/10 dark:bg-slate-800/95 dark:text-white transition-all animate-bounce-once">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+          <span>{toast}</span>
+        </div>
+      )}
+
+      {/* Modal: Change Email */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-blue-600" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Change Email Address</h3>
+              </div>
+              <button onClick={() => setShowEmailModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleChangeEmail} className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Current Email</label>
+                <input
+                  type="email"
+                  disabled
+                  value={profile.email}
+                  className="mt-1 block h-10 w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-sm text-slate-500 outline-none dark:border-slate-800 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">New Email Address</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. yourname@example.com"
+                  value={newEmailInput}
+                  onChange={(e) => setNewEmailInput(e.target.value)}
+                  className="mt-1 block h-10 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEmailModal(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={changingEmail}
+                  className="rounded-xl bg-blue-600 px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {changingEmail ? 'Updating…' : 'Update Email'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -205,7 +386,7 @@ export default function Settings() {
             </div>
             <form onSubmit={handleAddAccount} className="mt-4 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Select Bank / Institution</label>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Select Bank / Institution (Optional)</label>
                 <select
                   value={newAcc.bank}
                   onChange={(e) => setNewAcc({ ...newAcc, bank: e.target.value })}
@@ -217,16 +398,17 @@ export default function Settings() {
                   <option>Axis Bank</option>
                   <option>Kotak Mahindra Bank</option>
                   <option>Punjab National Bank</option>
+                  <option>Other Bank / Credit Union</option>
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Account Number</label>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Account Number (Optional)</label>
                 <input
                   type="text"
                   maxLength={18}
                   placeholder="e.g. 501004821987"
                   value={newAcc.accNum}
-                  onChange={(e) => setNewAcc({ ...newAcc, accNum: e.target.value.replace(/\D/g, '') })}
+                  onChange={(e) => setNewAcc({ ...newAcc, accNum: e.target.value.replace(/\D/g, '').slice(0, 18) })}
                   className="mt-1 block h-10 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
@@ -305,16 +487,28 @@ export default function Settings() {
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-[240px_1fr]">
             {/* Avatar section */}
             <div className="flex flex-col items-center justify-start border-b pb-6 lg:border-b-0 lg:border-r lg:pr-8 dark:border-slate-800">
-              <div className="relative flex h-28 w-28 items-center justify-center rounded-full bg-blue-50 text-3xl font-bold text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                {profile.fullName ? profile.fullName.trim().charAt(0).toUpperCase() : 'U'}
+              <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-3xl font-bold text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 border-2 border-blue-200 dark:border-blue-900 shadow-sm">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                ) : (
+                  profile.fullName ? profile.fullName.trim().charAt(0).toUpperCase() : 'U'
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => showToast('Profile avatar updated')}
-                className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-4 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
               >
+                <Camera className="h-3.5 w-3.5" />
                 Change Photo
               </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoUpload}
+              />
             </div>
 
             {/* Form section */}
@@ -332,7 +526,16 @@ export default function Settings() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Email Address</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Email Address</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowEmailModal(true)}
+                        className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Change Email
+                      </button>
+                    </div>
                     <input
                       type="email"
                       value={profile.email}
@@ -341,13 +544,13 @@ export default function Settings() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Phone Number</label>
+                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Phone Number (10 digits)</label>
                     <input
                       type="tel"
-                      maxLength={15}
+                      maxLength={10}
                       value={profile.phone}
-                      onChange={(e) => setProfile({ ...profile, phone: e.target.value.replace(/[^0-9+]/g, '') })}
-                      placeholder="+91 98765 43210"
+                      onChange={(e) => setProfile({ ...profile, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                      placeholder="9876543210"
                       className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
                   </div>
@@ -356,6 +559,8 @@ export default function Settings() {
                     <input
                       type="date"
                       value={profile.dob}
+                      min="1900-01-01"
+                      max="2026-11-11"
                       onChange={(e) => setProfile({ ...profile, dob: e.target.value })}
                       className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
@@ -373,10 +578,9 @@ export default function Settings() {
                       onChange={(e) => setProfile({ ...profile, country: e.target.value })}
                       className="mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
-                      <option>India</option>
-                      <option>United States</option>
-                      <option>United Kingdom</option>
-                      <option>Singapore</option>
+                      {COUNTRIES.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -386,10 +590,16 @@ export default function Settings() {
                       onChange={(e) => setProfile({ ...profile, language: e.target.value })}
                       className="mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
-                      <option>English</option>
-                      <option>Hindi</option>
-                      <option>Telugu</option>
-                      <option>Tamil</option>
+                      <option value="English">English</option>
+                      <option value="Hindi">हिन्दी (Hindi)</option>
+                      <option value="Telugu">తెలుగు (Telugu)</option>
+                      <option value="Tamil">தமிழ் (Tamil)</option>
+                      <option value="Kannada">ಕನ್ನಡ (Kannada)</option>
+                      <option value="Marathi">मराठी (Marathi)</option>
+                      <option value="Bengali">বাংলা (Bengali)</option>
+                      <option value="Spanish">Español (Spanish)</option>
+                      <option value="French">Français (French)</option>
+                      <option value="German">Deutsch (German)</option>
                     </select>
                   </div>
                   <div>
@@ -603,6 +813,100 @@ export default function Settings() {
             >
               Save Preferences
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: AI & GOOGLE GEMINI */}
+      {activeTab === 'AIAssistant' && (
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 dark:border-slate-800 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md">
+                  <Bot size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Google Gemini AI Assistant Integration</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Connect your free Gemini API key to power live personalized financial advice and real-time budgeting intelligence.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
+                  geminiConfig.configured
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                    : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                }`}>
+                  <span className={`h-2 w-2 rounded-full ${geminiConfig.configured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                  {geminiConfig.configured ? `Active (${geminiConfig.model || 'Gemini 1.5 Flash'})` : 'API Key Required'}
+                </span>
+              </div>
+            </div>
+
+            {/* Step-by-Step Instructions */}
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50/50 p-5 dark:border-blue-950 dark:bg-blue-950/20">
+              <div className="text-xs font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider mb-2">
+                How to get a 100% Free Gemini API Key (Takes 30 seconds):
+              </div>
+              <ol className="list-decimal list-inside space-y-1.5 text-xs text-blue-800 dark:text-blue-200/90 leading-relaxed">
+                <li>
+                  Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="font-bold underline text-blue-700 dark:text-blue-300 inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={11} className="inline" /></a>.
+                </li>
+                <li>Sign in with your Google Account and click <strong>"Create API Key"</strong>.</li>
+                <li>Copy the generated key (it starts with <code className="bg-white/80 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px] font-mono">AIzaSy...</code>) and paste it below.</li>
+              </ol>
+            </div>
+
+            {/* Key Form */}
+            <form onSubmit={handleSaveGeminiKey} className="mt-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Google Gemini API Key
+                </label>
+                <div className="relative">
+                  <Key size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="password"
+                    placeholder={geminiConfig.masked_key ? `Current Key: ${geminiConfig.masked_key}` : "Paste your Google Gemini API Key here (AIzaSy...)"}
+                    value={geminiKeyInput}
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-xs font-mono text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                {geminiConfig.masked_key && (
+                  <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                    ✓ Connected: {geminiConfig.masked_key}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={!geminiKeyInput.trim()}
+                  className="rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-40"
+                >
+                  Save &amp; Connect Gemini
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestGemini}
+                  disabled={testingGemini}
+                  className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-50"
+                >
+                  {testingGemini ? 'Testing Gemini…' : 'Test Assistant Response'}
+                </button>
+              </div>
+
+              {geminiTestOutput && (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs dark:border-slate-800 dark:bg-slate-800/60">
+                  <div className="font-bold text-slate-700 dark:text-slate-300 mb-1">AI Test Output:</div>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-mono text-[11px]">{geminiTestOutput}</p>
+                </div>
+              )}
+            </form>
           </div>
         </div>
       )}
@@ -905,8 +1209,11 @@ export default function Settings() {
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Active Now
                   </span>
                   <button
-                    onClick={() => showToast('Session signed out')}
-                    className="ml-2 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => {
+                      logout()
+                      navigate('/login')
+                    }}
+                    className="ml-2 rounded-lg border border-red-200 bg-red-50/50 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-400"
                   >
                     Sign out
                   </button>

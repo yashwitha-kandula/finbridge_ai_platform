@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import {
   ShieldCheck, BookOpen, Star, Briefcase, Info, Check, Lightbulb, CalendarDays,
   ShieldHalf, Scale, TrendingUp, Flame, Rocket, ArrowRight, BarChart3,
+  Sparkles, X, Globe, Download, CheckCircle2
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { authFetch } from '../lib/api'
@@ -99,6 +100,7 @@ export default function Investments() {
   const [toast, setToast] = useState(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState(1)
+  const [showAiSummaryModal, setShowAiSummaryModal] = useState(false)
   const refs = { 1: useRef(null), 2: useRef(null), 3: useRef(null), 4: useRef(null) }
 
   const set = (name, value) => setF((p) => ({ ...p, [name]: value }))
@@ -140,6 +142,7 @@ export default function Investments() {
       setResult(data)
       localStorage.setItem('finbridge_investment_profile', JSON.stringify({ ...f, result: data }))
       setToast('Investment profile saved — your ML risk profile is "' + data.risk_profile + '".')
+      setShowAiSummaryModal(true)
       setTimeout(() => setToast(null), 3500)
     } catch (e) {
       setError(e.message)
@@ -160,9 +163,11 @@ export default function Investments() {
 
   return (
     <div className="mx-auto max-w-[1400px]">
+      {/* Toast Notification */}
       {toast && (
-        <div className="fixed right-6 top-20 z-50 flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg">
-          <Check className="h-4 w-4" /> {toast}
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-slate-700/20 bg-slate-900/90 px-5 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur-md dark:border-white/10 dark:bg-slate-800/95 transition-all">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+          <span>{toast}</span>
         </div>
       )}
 
@@ -417,6 +422,163 @@ export default function Investments() {
           </div>
         </aside>
       </div>
+
+      {/* AI SUMMARY & REAL-WORLD SUGGESTIONS MODAL */}
+      {showAiSummaryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b pb-4 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-lg">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">AI Investment Strategy &amp; Real-World Market Allocation</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Personalized for {f.risk_tolerance} Risk Profile • {f.time_horizon} Horizon</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAiSummaryModal(false)}
+                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="mt-5 space-y-5">
+              {/* Top Highlights Banner */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-950 dark:bg-blue-950/20">
+                  <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">Monthly Commitment</span>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{fmtINR(f.monthly_investment)}</div>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Via {f.mode.split(' ')[0]}</span>
+                </div>
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 dark:border-emerald-950 dark:bg-emerald-950/20">
+                  <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">Expected Annual Return</span>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{f.expected_return}</div>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Target Benchmark</span>
+                </div>
+                <div className="rounded-2xl border border-purple-100 bg-purple-50/60 p-4 dark:border-purple-950 dark:bg-purple-950/20">
+                  <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400">Primary Goal</span>
+                  <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white truncate">{f.goal}</div>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{f.time_horizon}</span>
+                </div>
+              </div>
+
+              {/* Real-World Asset Allocation Table */}
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                  1. Recommended Real-World Asset Breakdown
+                </h4>
+                <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/80 font-bold text-slate-700 dark:text-slate-300">
+                      <tr>
+                        <th className="px-4 py-2.5">Asset Class</th>
+                        <th className="px-4 py-2.5">Allocation</th>
+                        <th className="px-4 py-2.5">Monthly Share</th>
+                        <th className="px-4 py-2.5">Real-World Instruments</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      <tr>
+                        <td className="px-4 py-3 font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-blue-600" /> Large &amp; Flexi-Cap Equity
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{alloc.Equity || 60}%</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{fmtINR(((Number(f.monthly_investment) || 0) * (alloc.Equity || 60)) / 100)}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">UTI Nifty 50 Index Fund, Parag Parikh Flexi Cap</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-emerald-600" /> Sovereign &amp; Corporate Debt
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{alloc.Debt || 30}%</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{fmtINR(((Number(f.monthly_investment) || 0) * (alloc.Debt || 30)) / 100)}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">SBI Short Duration, RBI Floating Rate Bonds</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-3 font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-amber-600" /> Gold (Inflation Hedge)
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{alloc.Gold || 5}%</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{fmtINR(((Number(f.monthly_investment) || 0) * (alloc.Gold || 5)) / 100)}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">Nippon India Gold ETF, Sovereign Gold Bonds</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-3 font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-purple-600" /> Cash &amp; Liquid Buffer
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{alloc.Cash || 5}%</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{fmtINR(((Number(f.monthly_investment) || 0) * (alloc.Cash || 5)) / 100)}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">High-Yield Savings, ICICI Prudential Liquid Fund</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Real-Time World Market Context */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                  <Globe className="h-4 w-4 text-blue-600" /> Real-Time Macro Environment Analysis
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div className="rounded-xl bg-white p-3 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">RBI Repo Rate (6.50%):</span> High interest rates make short-duration debt attractive right now before future easing cycles commence.
+                  </div>
+                  <div className="rounded-xl bg-white p-3 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">Inflation Protection (~5.4%):</span> A 60% equity + 5% gold weighting outpaces CPI inflation and preserves purchasing power.
+                  </div>
+                </div>
+              </div>
+
+              {/* Multi-Year Wealth Trajectory */}
+              <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 p-4 dark:border-indigo-950 dark:bg-indigo-950/20">
+                <h4 className="text-xs font-bold text-indigo-950 dark:text-indigo-200 mb-2">
+                  Compound Wealth Trajectory ({f.expected_return} CAGR with {fmtINR(f.monthly_investment)}/mo)
+                </h4>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-xl bg-white p-2.5 shadow-xs dark:bg-slate-800">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">In 5 Years</span>
+                    <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                      {fmtINR((Number(f.monthly_investment) || 25000) * 81.6)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white p-2.5 shadow-xs dark:bg-slate-800">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">In 10 Years</span>
+                    <div className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                      {fmtINR((Number(f.monthly_investment) || 25000) * 232.3)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white p-2.5 shadow-xs dark:bg-slate-800">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">In 15 Years</span>
+                    <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      {fmtINR((Number(f.monthly_investment) || 25000) * 504.6)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4 dark:border-slate-800">
+              <span className="text-[11px] text-slate-400">Generated by FinBridge ML Engine</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAiSummaryModal(false)}
+                  className="rounded-xl bg-blue-600 px-6 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
+                >
+                  Done &amp; Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

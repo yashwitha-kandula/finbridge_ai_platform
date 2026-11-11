@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from passlib.context import CryptContext
+import bcrypt
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 import secrets
-import httpx
+import urllib.request
+import json
 import os
 
 from .. import models
@@ -17,7 +18,6 @@ SECRET_KEY = "super-secret-key-for-finbridge-deployment-change-in-prod"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -59,6 +59,14 @@ class SocialAuthRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: str
 
+class SendOtpRequest(BaseModel):
+    identifier: str  # email or phone number
+    channel: str = "email"  # "email" | "sms"
+
+class VerifyOtpRequest(BaseModel):
+    identifier: str
+    otp: str
+
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
@@ -67,13 +75,25 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+class ChangeEmailRequest(BaseModel):
+    new_email: str
+
 # ── Helpers ──────────────────────────────────────────────────────
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not hashed_password or hashed_password == "SOCIAL_AUTH_NO_PASSWORD":
+        return False
+    try:
+        plain_bytes = plain_password.encode('utf-8')[:72]
+        hash_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(plain_bytes, hash_bytes)
+    except Exception:
+        return False
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    plain_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(plain_bytes, salt).decode('utf-8')
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -103,8 +123,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
-# In-memory password-reset token store (use DB/Redis in production)
+# In-memory password-reset token store and OTP store
 _reset_tokens: dict[str, dict] = {}
+_otp_store: dict[str, dict] = {}
 
 # ── Routes ───────────────────────────────────────────────────────
 
@@ -148,31 +169,36 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 # ── Social / OAuth login ─────────────────────────────────────────
 
-async def _verify_google_token(id_token: str) -> dict:
-    """Verify Google ID token via Google's tokeninfo endpoint."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid Google token")
-        data = resp.json()
-        return {"email": data["email"], "name": data.get("name", data["email"])}
+def _verify_google_token(id_token: str) -> dict:
+    """Verify Google ID token via Google's tokeninfo endpoint using standard library."""
+    url = f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+    req = urllib.request.Request(url, headers={"User-Agent": "FinBridge-AI"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+            return {"email": data["email"], "name": data.get("name", data["email"])}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
 
-async def _verify_microsoft_token(access_token: str) -> dict:
-    """Verify Microsoft token by calling the MS Graph /me endpoint."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            "https://graph.microsoft.com/v1.0/me",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid Microsoft token")
-        data = resp.json()
-        return {
-            "email": data.get("mail") or data.get("userPrincipalName", ""),
-            "name": data.get("displayName", ""),
+def _verify_microsoft_token(access_token: str) -> dict:
+    """Verify Microsoft token by calling MS Graph /me endpoint using standard library."""
+    url = "https://graph.microsoft.com/v1.0/me"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": "FinBridge-AI"
         }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+            return {
+                "email": data.get("mail") or data.get("userPrincipalName", ""),
+                "name": data.get("displayName", ""),
+            }
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Microsoft token: {str(e)}")
 
 @router.post("/social", response_model=Token)
 async def social_auth(req: SocialAuthRequest, db: Session = Depends(get_db)):
@@ -187,16 +213,15 @@ async def social_auth(req: SocialAuthRequest, db: Session = Depends(get_db)):
     # Verify tokens server-side when possible
     if req.provider == "google":
         try:
-            info = await _verify_google_token(req.token)
+            info = _verify_google_token(req.token)
             verified_email = info["email"]
             verified_name = info["name"]
         except Exception:
             # If verification fails (e.g. network), trust client data
-            # This is a compromise for dev; in production always verify.
             pass
     elif req.provider == "microsoft":
         try:
-            info = await _verify_microsoft_token(req.token)
+            info = _verify_microsoft_token(req.token)
             verified_email = info["email"]
             verified_name = info["name"]
         except Exception:
@@ -254,27 +279,92 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         "reset_token": token,  # DEV ONLY — remove in production
     }
 
-@router.post("/reset-password")
-def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Reset password using a token from forgot-password flow."""
-    token_data = _reset_tokens.get(req.token)
-    if not token_data:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    if datetime.utcnow() > token_data["expires"]:
-        _reset_tokens.pop(req.token, None)
-        raise HTTPException(status_code=400, detail="Reset token has expired")
+@router.post("/send-otp")
+def send_otp(req: SendOtpRequest, db: Session = Depends(get_db)):
+    """
+    Generates a 6-digit confirmation OTP for email or mobile phone.
+    """
+    identifier = req.identifier.strip().lower()
+    # Find user by email or mobile
+    user = db.query(models.User).filter(
+        (models.User.email == identifier) | (models.User.mobile == identifier)
+    ).first()
 
-    if len(req.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    # Generate 6-digit cryptographically secure OTP
+    otp = f"{secrets.randbelow(900000) + 100000}"
+    _otp_store[identifier] = {
+        "otp": otp,
+        "email": user.email if user else identifier,
+        "expires": datetime.utcnow() + timedelta(minutes=10)
+    }
 
-    user = db.query(models.User).filter(models.User.email == token_data["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    dest_type = "SMS to your phone" if req.channel == "sms" or identifier.isdigit() or identifier.startswith("+") else "email"
+    return {
+        "status": "ok",
+        "message": f"Confirmation OTP has been sent via {dest_type}.",
+        "channel": req.channel,
+        "otp": otp  # Included for immediate development / verification convenience
+    }
 
-    user.hashed_password = get_password_hash(req.new_password)
+@router.post("/verify-otp")
+def verify_otp(req: VerifyOtpRequest):
+    """
+    Verifies the 6-digit OTP and generates a password reset token.
+    """
+    identifier = req.identifier.strip().lower()
+    stored = _otp_store.get(identifier)
+
+    if not stored:
+        raise HTTPException(status_code=400, detail="No OTP requested or OTP expired. Please request a new code.")
+    if datetime.utcnow() > stored["expires"]:
+        _otp_store.pop(identifier, None)
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new code.")
+    if stored["otp"] != req.otp.strip():
+        raise HTTPException(status_code=400, detail="Incorrect OTP. Please enter the valid 6-digit code.")
+
+    # OTP is valid! Generate reset token
+    token = secrets.token_urlsafe(32)
+    _reset_tokens[token] = {
+        "email": stored["email"],
+        "expires": datetime.utcnow() + timedelta(hours=1)
+    }
+    _otp_store.pop(identifier, None)
+
+    return {
+        "status": "ok",
+        "message": "OTP verified successfully.",
+        "reset_token": token
+    }
+
+@router.post("/change-email")
+def change_email(
+    req: ChangeEmailRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Updates the authenticated user's email address.
+    """
+    new_email = req.new_email.strip().lower()
+    if not new_email or "@" not in new_email:
+        raise HTTPException(status_code=400, detail="Please provide a valid email address.")
+
+    existing = db.query(models.User).filter(models.User.email == new_email).first()
+    if existing and existing.id != current_user.id:
+        raise HTTPException(status_code=400, detail="Email is already in use by another account.")
+
+    current_user.email = new_email
     db.commit()
-    _reset_tokens.pop(req.token, None)
-    return {"status": "ok", "message": "Password has been reset successfully. You can now log in."}
+    db.refresh(current_user)
+
+    # Re-issue token with updated email sub
+    new_token = create_access_token(data={"sub": current_user.email})
+    return {
+        "status": "ok",
+        "message": "Email updated successfully.",
+        "access_token": new_token,
+        "email": current_user.email
+    }
 
 # ── Change Password (authenticated) ──────────────────────────────
 

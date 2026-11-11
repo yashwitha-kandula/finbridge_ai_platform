@@ -4,6 +4,7 @@ import {
   Lightbulb, CheckCircle2, Star, Building2, Calendar, CreditCard, Info
 } from 'lucide-react'
 import { inr } from '../lib/format'
+import { useNotification } from '../context/NotificationContext'
 
 /* --- UI Components --- */
 function Toggle({ active, onChange }) {
@@ -85,6 +86,7 @@ function SelectField({ label, value, onChange, options }) {
 
 /* --- Main Page --- */
 export default function Income() {
+  const { notify } = useNotification()
   // Pre-fill with the mock values to exactly match the design
   const [primary, setPrimary] = useState({
     employer: 'TechSolutions Pvt. Ltd.',
@@ -219,10 +221,28 @@ export default function Income() {
 
           {/* Actions */}
           <div className="flex items-center justify-between pt-2">
-            <button onClick={() => alert("Form cleared")} className="rounded-lg border border-slate-200 bg-white px-6 py-2.5 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">
-              Cancel
+            <button
+              onClick={() => {
+                notify({
+                  title: 'Income Form Reset',
+                  message: 'Income details have been reset to default values.',
+                  type: 'info'
+                })
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-6 py-2.5 font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              Reset
             </button>
-            <button onClick={() => alert("Income Details Saved Successfully!")} className="rounded-lg bg-indigo-600 px-6 py-2.5 font-semibold text-white shadow-sm transition hover:bg-indigo-700">
+            <button
+              onClick={() => {
+                notify({
+                  title: 'Income Streams Updated',
+                  message: `Recorded monthly income of ₹${total.toLocaleString('en-IN')}/mo into your profile.`,
+                  type: 'success'
+                })
+              }}
+              className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
               Save Income Details
             </button>
           </div>

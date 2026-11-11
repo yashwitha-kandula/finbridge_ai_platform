@@ -1,11 +1,12 @@
 import os
-
+from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-
-# Load variables from backend/.env
+# Load variables from backend/.env regardless of working directory
+_backend_dir = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=_backend_dir / ".env")
 load_dotenv()
 
 

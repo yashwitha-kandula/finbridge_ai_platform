@@ -18,6 +18,10 @@ export function AuthProvider({ children }) {
         const u = await res.json()
         setUser(u)
         return u
+      } else if (res.status === 401) {
+        localStorage.removeItem('finbridge_token')
+        setToken(null)
+        setUser(null)
       }
     } catch (err) {
       console.error('Failed to fetch user', err)
@@ -77,7 +81,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ token, user, setUser, loading, login, register, socialLogin, logout, refreshUser }}>
+    <AuthContext.Provider value={{ token, setToken, user, setUser, loading, login, register, socialLogin, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

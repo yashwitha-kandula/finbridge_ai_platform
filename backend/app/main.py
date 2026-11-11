@@ -1,3 +1,14 @@
+import sys
+from pathlib import Path
+
+# Ensure both backend root and platform root are on sys.path
+_current_file = Path(__file__).resolve()
+_backend_dir = _current_file.parent.parent
+_platform_dir = _backend_dir.parent
+for _p in [str(_backend_dir), str(_platform_dir)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -19,7 +30,10 @@ from .routes.investments import router as investments_router
 from .database import init_db
 
 # Initialize database tables
-init_db()
+try:
+    init_db()
+except Exception as _db_err:
+    print(f"[FinBridge DB] Database initialization deferred: {_db_err}")
 
 # ============================================================
 # FINBRIDGE AI - FASTAPI APPLICATION

@@ -18,19 +18,22 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
-with engine.begin() as _c:
-    _c.execute(text("""
-        CREATE TABLE IF NOT EXISTS reminders (
-            id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            title VARCHAR(150) NOT NULL,
-            category VARCHAR(30) NOT NULL DEFAULT 'other',
-            amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-            due_date DATE NOT NULL,
-            is_sample BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
+try:
+    with engine.begin() as _c:
+        _c.execute(text("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(150) NOT NULL,
+                category VARCHAR(30) NOT NULL DEFAULT 'other',
+                amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+                due_date DATE NOT NULL,
+                is_sample BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+except Exception as _e:
+    pass
 
 
 # ---------------------------------------------------------------- helpers

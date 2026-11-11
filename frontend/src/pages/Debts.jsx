@@ -5,6 +5,7 @@ import {
   ChevronDown, ArrowRight
 } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
+import { useNotification } from '../context/NotificationContext'
 
 const LOAN_COLORS = {
   'Home Loan': '#7c3aed', // purple-600
@@ -14,6 +15,7 @@ const LOAN_COLORS = {
 }
 
 export default function Debts() {
+  const { notify } = useNotification()
   const [toast, setToast] = useState(null)
   const [savedLoans, setSavedLoans] = useState([
     { type: 'Home Loan', amount: 3462450, emi: 28745, rate: 8.65 }
@@ -75,7 +77,11 @@ export default function Debts() {
 
   const handleSave = () => {
     if (!form.outstandingAmount || !form.loanType) {
-      alert("Please enter at least the Loan Type and Outstanding Amount.")
+      notify({
+        title: 'Missing Required Fields',
+        message: 'Please enter at least the Loan Type and Outstanding Amount.',
+        type: 'error'
+      })
       return
     }
     
@@ -87,7 +93,11 @@ export default function Debts() {
     }
 
     setSavedLoans([newLoan, ...savedLoans])
-    setToast(`${form.loanType} details saved successfully!`)
+    notify({
+      title: 'Loan Saved',
+      message: `${form.loanType} details saved successfully!`,
+      type: 'success'
+    })
     
     // Clear form for next entry
     setForm({
@@ -112,8 +122,9 @@ export default function Debts() {
       
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-xl animate-bounce">
-          <CheckCircle2 size={18} /> {toast}
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-slate-700/20 bg-slate-900/90 px-5 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur-md dark:border-white/10 dark:bg-slate-800/95 transition-all">
+          <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+          <span>{toast}</span>
         </div>
       )}
 
@@ -170,8 +181,8 @@ export default function Debts() {
                   </div>
                 </div>
                 <div>
-                  <InputLabel text="Loan Account / Reference No." />
-                  <input type="text" value={form.accountNo} onChange={e => handleChange('accountNo', e.target.value)} className={`${inputCls} pl-3`} placeholder="HL12345..." />
+                  <InputLabel text="Loan Account / Reference No. (Optional)" />
+                  <input type="text" value={form.accountNo} onChange={e => handleChange('accountNo', e.target.value)} className={`${inputCls} pl-3`} placeholder="e.g. HL12345 (Optional)" />
                 </div>
 
                 <div>

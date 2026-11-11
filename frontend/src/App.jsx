@@ -15,6 +15,7 @@ import Assistant from './pages/Assistant'
 import Settings from './pages/Settings'
 
 import { ThemeProvider } from './theme/ThemeProvider'
+import { NotificationProvider } from './context/NotificationContext'
 
 function Gate({ children }) {
   const { token, loading } = useAuth()
@@ -25,27 +26,29 @@ function Gate({ children }) {
 export default function App() {
   return (
     <ThemeProvider>
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Gate><Layout /></Gate>}>
-            <Route index element={<Dashboard />} />
-            <Route path="income" element={<Income />} />
-            <Route path="expenses" element={<Expenses />} />
-            <Route path="transactions" element={<Transactions />} />
-            <Route path="debts" element={<Debts />} />
-            <Route path="goals" element={<Goals />} />
-            <Route path="family" element={<FamilyPlanning />} />
-            <Route path="investments" element={<Investments />} />
-            <Route path="forecast" element={<Forecast />} />
-            <Route path="assistant" element={<Assistant />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+      <NotificationProvider>
+        <BrowserRouter>
+          <AuthProvider>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/" element={<Gate><Layout /></Gate>}>
+                <Route index element={<Dashboard />} />
+                <Route path="income" element={<Income />} />
+                <Route path="expenses" element={<Expenses />} />
+                <Route path="transactions" element={<Transactions />} />
+                <Route path="debts" element={<Debts />} />
+                <Route path="goals" element={<Goals />} />
+                <Route path="family" element={<FamilyPlanning />} />
+                <Route path="investments" element={<Investments />} />
+                <Route path="forecast" element={<Forecast />} />
+                <Route path="assistant" element={<Assistant />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </NotificationProvider>
     </ThemeProvider>
   )
 }

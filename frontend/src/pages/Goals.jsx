@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Target, Car, Flag, Info, ShieldCheck, ChevronRight,
   CheckCircle2, AlertCircle, Home, PiggyBank, Lightbulb,
-  TrendingUp, Settings, ArrowUpSquare, ChevronDown, Percent
+  TrendingUp, Settings, ArrowUpSquare, ChevronDown, Percent,
+  Sparkles, MessageSquare, Send, X, Bot, User
 } from 'lucide-react'
 import Modal, { FormField, fieldCls } from '../components/Modal'
+import { API } from '../lib/api'
+import { useNotification } from '../context/NotificationContext'
 
 // Simple Toggle Component
 const Toggle = ({ enabled, onChange }) => (
@@ -17,6 +20,7 @@ const Toggle = ({ enabled, onChange }) => (
 )
 
 export default function Goals() {
+  const { notify } = useNotification()
   const [toast, setToast] = useState(null)
   
   const [form, setForm] = useState({
@@ -35,7 +39,65 @@ export default function Goals() {
     autoAdjust: true
   })
 
-  // Dynamic Math for Preview
+  // AI Goal Chat State
+  const [showAiChat, setShowAiChat] = useState(false)
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    {
+      sender: 'ai',
+      text: 'Hello! I am your FinBridge AI Goal Advisor. I can help calculate the exact SIP, suggest asset allocation, or evaluate if your timeline is realistic. What would you like to know?'
+    }
+  ])
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const chatBottomRef = useRef(null)
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, showAiChat])
+
+  const handleSendAiMessage = async (queryText) => {
+    const q = (queryText || chatInput).trim()
+    if (!q || isAiLoading) return
+
+    const userMsg = { sender: 'user', text: q }
+    setChatMessages((prev) => [...prev, userMsg])
+    setChatInput('')
+    setIsAiLoading(true)
+
+    try {
+      const res = await fetch(`${API}/api/ai/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          context: {
+            user_name: 'Investor',
+            goal_name: form.name,
+            target_amount: targetAmt,
+            current_savings: currSave,
+            monthly_save: plannedSave,
+            months_left: months,
+            expected_return: expectedReturn
+          }
+        })
+      })
+      const data = await res.json()
+      const answer = data.answer || 'Consider increasing monthly investments in diversified equity index funds to reach your target comfortably.'
+      setChatMessages((prev) => [...prev, { sender: 'ai', text: answer }])
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: `For ${form.name} (Target: ₹${targetAmt.toLocaleString()}), saving ₹${Math.round(monthlyNeeded).toLocaleString()}/month across Index Funds (12%) and Liquid Funds (6%) will help you achieve the goal on schedule.`
+        }
+      ])
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // Header & Math
   const targetAmt = parseFloat(form.targetAmount) || 0
   const currSave = parseFloat(form.currentSavings) || 0
   const plannedSave = parseFloat(form.monthlySave) || 0
@@ -88,10 +150,18 @@ export default function Goals() {
 
   const handleSave = () => {
     if (!form.name || !form.targetAmount) {
-      alert("Please enter Goal Name and Target Amount.")
+      notify({
+        title: 'Missing Goal Information',
+        message: 'Please enter Goal Name and Target Amount.',
+        type: 'error'
+      })
       return
     }
-    setToast(`Goal "${form.name}" saved successfully!`)
+    notify({
+      title: 'Goal Saved',
+      message: `Goal "${form.name}" has been recorded into your plan.`,
+      type: 'success'
+    })
   }
 
   const InputLabel = ({ text, required }) => (
@@ -109,8 +179,9 @@ export default function Goals() {
       
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-xl animate-bounce">
-          <CheckCircle2 size={18} /> {toast}
+        <div className="fixed bottom-6 left-6 z-50 flex items-center gap-2.5 rounded-2xl border border-slate-700/20 bg-slate-900/90 px-5 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur-md dark:border-white/10 dark:bg-slate-800/95 transition-all">
+          <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+          <span>{toast}</span>
         </div>
       )}
 
@@ -416,6 +487,114 @@ export default function Goals() {
 
         </div>
       </div>
+
+      {/* Floating AI Goal Advisor Button */}
+      <button
+        onClick={() => setShowAiChat(true)}
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-2xl transition hover:from-blue-700 hover:to-indigo-700 hover:scale-105 active:scale-95"
+      >
+        <Sparkles size={18} className="animate-pulse text-amber-300" />
+        <span>AI Goal Advisor</span>
+      </button>
+
+      {/* AI Goal Chat Popup Modal */}
+      {showAiChat && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end p-4 sm:p-6 bg-slate-900/40 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 dark:border-slate-800 dark:bg-slate-900 flex flex-col h-[520px] overflow-hidden animate-in fade-in slide-in-from-bottom-5">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/60">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                  <Bot size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">AI Goal Advisor</h3>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">Real-time Goal Optimizer &amp; SIP Calculator</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAiChat(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Quick Prompt Chips */}
+            <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex gap-1.5 overflow-x-auto no-scrollbar bg-slate-50/50 dark:bg-slate-800/40">
+              {[
+                `How to reach ₹${targetAmt.toLocaleString()} in ${months} months?`,
+                `Recommend asset allocation for ${form.name}`,
+                'Compare SIP vs FD returns'
+              ].map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSendAiMessage(chip)}
+                  className="shrink-0 text-[11px] font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-full hover:bg-blue-50 dark:hover:bg-slate-700 transition"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            {/* Message Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+              {chatMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`flex gap-2.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  {msg.sender === 'ai' && (
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 text-xs font-bold">
+                      AI
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
+                      msg.sender === 'user'
+                        ? 'bg-blue-600 text-white rounded-br-none'
+                        : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 rounded-bl-none'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isAiLoading && (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Bot size={14} className="animate-spin text-blue-600" />
+                  Analyzing goal trajectory…
+                </div>
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* Chat Input */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleSendAiMessage()
+              }}
+              className="p-3 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-2"
+            >
+              <input
+                type="text"
+                placeholder="Ask about SIP, timelines, or asset allocation..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-600"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim() || isAiLoading}
+                className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition"
+              >
+                <Send size={14} />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
