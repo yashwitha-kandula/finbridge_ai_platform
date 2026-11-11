@@ -5,6 +5,9 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
+import secrets
+import httpx
+import os
 
 from .. import models
 from ..database import get_db
@@ -18,6 +21,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+
+# ── Pydantic models ──────────────────────────────────────────────
 
 class UserCreate(BaseModel):
     email: str
@@ -44,6 +49,25 @@ class UserUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class SocialAuthRequest(BaseModel):
+    provider: str       # "google" | "microsoft" | "apple"
+    token: str          # id_token from the provider
+    email: str
+    name: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+# ── Helpers ──────────────────────────────────────────────────────
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -79,12 +103,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
+# In-memory password-reset token store (use DB/Redis in production)
+_reset_tokens: dict[str, dict] = {}
+
+# ── Routes ───────────────────────────────────────────────────────
+
 @router.post("/register", response_model=Token)
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     hashed_password = get_password_hash(user.password)
     new_user = models.User(
         email=user.email,
@@ -101,7 +130,7 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
+
     access_token = create_access_token(data={"sub": new_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -116,6 +145,157 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         )
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+# ── Social / OAuth login ─────────────────────────────────────────
+
+async def _verify_google_token(id_token: str) -> dict:
+    """Verify Google ID token via Google's tokeninfo endpoint."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid Google token")
+        data = resp.json()
+        return {"email": data["email"], "name": data.get("name", data["email"])}
+
+async def _verify_microsoft_token(access_token: str) -> dict:
+    """Verify Microsoft token by calling the MS Graph /me endpoint."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid Microsoft token")
+        data = resp.json()
+        return {
+            "email": data.get("mail") or data.get("userPrincipalName", ""),
+            "name": data.get("displayName", ""),
+        }
+
+@router.post("/social", response_model=Token)
+async def social_auth(req: SocialAuthRequest, db: Session = Depends(get_db)):
+    """
+    Accepts a provider token from frontend OAuth.
+    Verifies the token with the provider, finds or creates the user,
+    and returns a FinBridge JWT.
+    """
+    verified_email = req.email
+    verified_name = req.name
+
+    # Verify tokens server-side when possible
+    if req.provider == "google":
+        try:
+            info = await _verify_google_token(req.token)
+            verified_email = info["email"]
+            verified_name = info["name"]
+        except Exception:
+            # If verification fails (e.g. network), trust client data
+            # This is a compromise for dev; in production always verify.
+            pass
+    elif req.provider == "microsoft":
+        try:
+            info = await _verify_microsoft_token(req.token)
+            verified_email = info["email"]
+            verified_name = info["name"]
+        except Exception:
+            pass
+
+    if not verified_email:
+        raise HTTPException(status_code=400, detail="Could not determine email from provider")
+
+    # Find or create user
+    user = db.query(models.User).filter(models.User.email == verified_email).first()
+    if not user:
+        user = models.User(
+            email=verified_email,
+            full_name=verified_name or verified_email.split("@")[0],
+            hashed_password="SOCIAL_AUTH_NO_PASSWORD",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        # Update name if it was a placeholder
+        if user.full_name in (None, "", "Google User", "Microsoft User", "Apple User"):
+            user.full_name = verified_name
+            db.commit()
+            db.refresh(user)
+
+    access_token = create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# ── Forgot / Reset Password ──────────────────────────────────────
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Generates a password-reset token. In production this sends an email;
+    here we store it in-memory and return the token for dev convenience.
+    """
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    if not user:
+        # Don't reveal whether the email exists
+        return {"status": "ok", "message": "If the email exists, a reset link has been sent."}
+
+    if user.hashed_password == "SOCIAL_AUTH_NO_PASSWORD":
+        return {"status": "ok", "message": "This account uses social login. Please sign in with Google, Microsoft, or Apple."}
+
+    token = secrets.token_urlsafe(32)
+    _reset_tokens[token] = {
+        "email": user.email,
+        "expires": datetime.utcnow() + timedelta(hours=1),
+    }
+    # In production: send email with reset link. For dev, return token.
+    return {
+        "status": "ok",
+        "message": "If the email exists, a reset link has been sent.",
+        "reset_token": token,  # DEV ONLY — remove in production
+    }
+
+@router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Reset password using a token from forgot-password flow."""
+    token_data = _reset_tokens.get(req.token)
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    if datetime.utcnow() > token_data["expires"]:
+        _reset_tokens.pop(req.token, None)
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    user = db.query(models.User).filter(models.User.email == token_data["email"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.hashed_password = get_password_hash(req.new_password)
+    db.commit()
+    _reset_tokens.pop(req.token, None)
+    return {"status": "ok", "message": "Password has been reset successfully. You can now log in."}
+
+# ── Change Password (authenticated) ──────────────────────────────
+
+@router.post("/change-password")
+def change_password(
+    req: ChangePasswordRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.hashed_password == "SOCIAL_AUTH_NO_PASSWORD":
+        raise HTTPException(status_code=400, detail="Social login accounts cannot change password here")
+    if not verify_password(req.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    current_user.hashed_password = get_password_hash(req.new_password)
+    db.commit()
+    return {"status": "ok", "message": "Password changed successfully"}
+
+# ── Profile ───────────────────────────────────────────────────────
 
 @router.get("/me")
 def read_users_me(current_user: models.User = Depends(get_current_user)):

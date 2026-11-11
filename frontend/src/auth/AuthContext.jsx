@@ -59,6 +59,17 @@ export function AuthProvider({ children }) {
     setToken(data.access_token)
   }, [])
 
+  const socialLogin = useCallback(async (provider, oauthToken, email, name) => {
+    const res = await fetch(`${API}/api/auth/social`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, token: oauthToken, email, name }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || 'Social login failed')
+    setToken(data.access_token)
+  }, [])
+
   const logout = useCallback(() => {
     localStorage.removeItem('finbridge_token')
     setToken(null)
@@ -66,7 +77,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ token, user, setUser, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ token, user, setUser, loading, login, register, socialLogin, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )
