@@ -13,3 +13,4 @@ frontend/dist/
 # Very large datasets (keep locally, do not push to GitHub)
 *.parquet
 *.csv
+*.joblib

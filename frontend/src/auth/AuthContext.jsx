@@ -8,6 +8,22 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(!!localStorage.getItem('finbridge_token'))
 
+  const refreshUser = useCallback(async () => {
+    if (!token) return
+    try {
+      const res = await fetch(`${API}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const u = await res.json()
+        setUser(u)
+        return u
+      }
+    } catch (err) {
+      console.error('Failed to fetch user', err)
+    }
+  }, [token])
+
   useEffect(() => {
     if (!token) {
       localStorage.removeItem('finbridge_token')
@@ -17,12 +33,8 @@ export function AuthProvider({ children }) {
     }
     localStorage.setItem('finbridge_token', token)
     setLoading(true)
-    fetch(`${API}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setLoading(false))
-  }, [token])
+    refreshUser().finally(() => setLoading(false))
+  }, [token, refreshUser])
 
   const login = useCallback(async (email, password) => {
     const body = new URLSearchParams({ username: email, password })
@@ -47,10 +59,14 @@ export function AuthProvider({ children }) {
     setToken(data.access_token)
   }, [])
 
-  const logout = useCallback(() => setToken(null), [])
+  const logout = useCallback(() => {
+    localStorage.removeItem('finbridge_token')
+    setToken(null)
+    setUser(null)
+  }, [])
 
   return (
-    <AuthContext.Provider value={{ token, user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ token, user, setUser, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

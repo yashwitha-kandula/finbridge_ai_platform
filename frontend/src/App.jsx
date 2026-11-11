@@ -10,6 +10,9 @@ import Debts from './pages/Debts'
 import Goals from './pages/Goals'
 import FamilyPlanning from './pages/FamilyPlanning'
 import Forecast from './pages/Forecast'
+import Investments from './pages/Investments'
+import Assistant from './pages/Assistant'
+import Settings from './pages/Settings'
 
 import { ThemeProvider } from './theme/ThemeProvider'
 
@@ -17,10 +20,6 @@ function Gate({ children }) {
   const { token, loading } = useAuth()
   if (loading) return null
   return token ? children : <Navigate to="/login" replace />
-}
-
-function Placeholder({ title }) {
-  return <div className="flex h-[50vh] items-center justify-center text-slate-400 dark:text-slate-500">{title} page is under construction.</div>
 }
 
 export default function App() {
@@ -38,12 +37,10 @@ export default function App() {
             <Route path="debts" element={<Debts />} />
             <Route path="goals" element={<Goals />} />
             <Route path="family" element={<FamilyPlanning />} />
-            <Route path="investments" element={<Placeholder title="Investments" />} />
+            <Route path="investments" element={<Investments />} />
             <Route path="forecast" element={<Forecast />} />
-            <Route path="assistant" element={<Placeholder title="AI Assistant" />} />
-            <Route path="reports" element={<Placeholder title="Reports" />} />
-            <Route path="documents" element={<Placeholder title="Documents" />} />
-            <Route path="settings" element={<Placeholder title="Settings" />} />
+            <Route path="assistant" element={<Assistant />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

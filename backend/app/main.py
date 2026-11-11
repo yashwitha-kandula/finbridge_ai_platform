@@ -15,6 +15,7 @@ from .routes.aggregator import router as aggregator_router
 from .routes.loans import router as loans_router
 from .routes.plaid_router import router as plaid_router
 from .routes.dashboard import router as dashboard_router
+from .routes.investments import router as investments_router
 from .database import init_db
 
 # Initialize database tables
@@ -68,6 +69,7 @@ app.include_router(aggregator_router)
 app.include_router(loans_router)
 app.include_router(plaid_router)
 app.include_router(dashboard_router)
+app.include_router(investments_router)
 
 
 # ============================================================
