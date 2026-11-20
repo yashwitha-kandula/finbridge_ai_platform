@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../theme/ThemeProvider'
 import { COUNTRIES } from '../lib/countries'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8001'
 
 /* ──────────────── inline SVG icons ──────────────── */
 const I = ({ children }) => (
@@ -344,7 +344,7 @@ export default function Login() {
       setOtpTimer(60)
       setSuccess(`Verification OTP sent! (Dev code: ${data.otp})`)
     } catch (err) {
-      setError(err.message || 'Cannot reach server. Verify backend is running on port 8000.')
+      setError(err.message || 'Cannot reach server. Verify backend is running on port 8001.')
     } finally {
       setBusy(false)
     }
@@ -420,7 +420,7 @@ export default function Login() {
         navigate('/', { replace: true })
       } catch (err) {
         setError(err.message === 'Failed to fetch'
-          ? 'Cannot reach backend server. Make sure Python uvicorn is running on port 8000.'
+          ? 'Cannot reach backend server. Make sure Python uvicorn is running on port 8001.'
           : err.message)
       } finally { setBusy(false) }
       return
@@ -456,7 +456,7 @@ export default function Login() {
       navigate('/', { replace: true })
     } catch (err) {
       setError(err.message === 'Failed to fetch'
-        ? 'Cannot reach backend server. Make sure Python uvicorn is running on port 8000.'
+        ? 'Cannot reach backend server. Make sure Python uvicorn is running on port 8001.'
         : err.message)
     } finally { setBusy(false) }
   }

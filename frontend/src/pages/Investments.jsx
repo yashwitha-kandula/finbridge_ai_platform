@@ -31,7 +31,7 @@ const RISK_NOTE = {
   'Very Aggressive': 'You seek maximum growth and can accept significant short-term losses.',
 }
 const ALLOC_COLORS = { Equity: '#2563eb', Debt: '#16a34a', Gold: '#f59e0b', Cash: '#8b5cf6' }
-const DEFAULT_ALLOC = { Equity: 60, Debt: 30, Gold: 5, Cash: 5 }
+const DEFAULT_ALLOC = { Equity: 0, Debt: 0, Gold: 0, Cash: 0 }
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const fmtINR = (n) => '₹' + Number(n || 0).toLocaleString('en-IN')
@@ -45,7 +45,7 @@ const lbl = 'mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300
 function SectionTitle({ n, icon: Icon, children }) {
   return (
     <div className="mb-4 flex items-center gap-2.5 text-[15px] font-semibold text-blue-700 dark:text-blue-400">
-      <Icon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+      <Icon className="h-[18px] w-[18px]" />
       {n}. {children}
     </div>
   )
@@ -81,19 +81,25 @@ function RiskGauge({ score, label }) {
 
 export default function Investments() {
   const { token } = useAuth()
-  const [f, setF] = useState({
-    risk_tolerance: 'Moderate',
-    knowledge: 'Intermediate',
-    experience: '2 - 5 Years',
-    invested_before: true,
-    products: ['Stocks / Shares', 'Mutual Funds', 'Bonds'],
-    goal: 'Wealth Creation',
-    time_horizon: '10+ Years',
-    expected_return: '10 - 12%',
-    purpose: 'Long term wealth creation, financial freedom and early retirement.',
-    monthly_investment: '25000',
-    mode: MODES[0],
-    start_date: todayISO(),
+  const [f, setF] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('finbridge_investment_draft'))
+      if (saved) return saved
+    } catch {}
+    return {
+    risk_tolerance: '',
+    knowledge: '',
+    experience: '',
+    invested_before: false,
+    products: [],
+    goal: '',
+    time_horizon: '',
+    expected_return: '',
+    purpose: '',
+    monthly_investment: '',
+    mode: '',
+    start_date: '',
+    }
   })
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -101,6 +107,9 @@ export default function Investments() {
   const [error, setError] = useState('')
   const [tab, setTab] = useState(1)
   const [showAiSummaryModal, setShowAiSummaryModal] = useState(false)
+  useEffect(() => {
+    localStorage.setItem('finbridge_investment_draft', JSON.stringify(f))
+  }, [f])
   const refs = { 1: useRef(null), 2: useRef(null), 3: useRef(null), 4: useRef(null) }
 
   const set = (name, value) => setF((p) => ({ ...p, [name]: value }))
@@ -116,6 +125,11 @@ export default function Investments() {
   /* live ML preview (debounced) */
   useEffect(() => {
     const t = setTimeout(async () => {
+      if (!f.risk_tolerance || !f.goal || !f.time_horizon || !Number(f.monthly_investment)) {
+        setResult(null)
+        setError('')
+        return
+      }
       try {
         const data = await authFetch(token, '/api/investments/profile', {
           method: 'POST', body: JSON.stringify(payload),

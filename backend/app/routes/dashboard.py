@@ -16,6 +16,45 @@ from sqlalchemy.orm import Session
 from ..database import get_db, engine
 from .auth import get_current_user
 
+class TransactionIn(BaseModel):
+    amount: float
+    transaction_type: str
+    category: str
+    description: Optional[str] = ""
+    merchant_name: Optional[str] = ""
+    transaction_date: str
+    payment_method: Optional[str] = "UPI"
+    is_recurring: bool = False
+
+class LoanInData(BaseModel):
+    loan_type: str
+    lender_name: str
+    principal_amount: float = 0
+    outstanding_amount: float
+    interest_rate: float = 0
+    tenure_months: Optional[int] = None
+    minimum_payment: float = 0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    next_payment_date: Optional[str] = None
+    description: Optional[str] = ""
+
+class FamilyMemberIn(BaseModel):
+    name: str
+    relationship: Optional[str] = ""
+    date_of_birth: Optional[str] = None
+    is_dependent: bool = False
+    monthly_expense: float = 0
+    description: Optional[str] = ""
+
+class FutureExpenseIn(BaseModel):
+    expense_name: str
+    expense_category: Optional[str] = ""
+    expected_amount: float
+    expected_date: str
+    priority: Optional[str] = "Medium"
+    description: Optional[str] = ""
+
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 try:
@@ -113,6 +152,7 @@ def _health_text(score: Optional[int]):
 
 
 def _category_id(db: Session, uid: int, name: str, ctype: str) -> int:
+    ctype = ctype.lower()
     row = db.execute(text("""
         SELECT id FROM categories
         WHERE lower(name)=lower(:n) AND category_type=:t
@@ -126,6 +166,109 @@ def _category_id(db: Session, uid: int, name: str, ctype: str) -> int:
         ON CONFLICT (name, category_type) DO UPDATE SET is_active=TRUE
         RETURNING id
     """), {"n": name, "t": ctype, "u": uid}).scalar()
+
+
+@router.post("/transactions")
+def add_transaction(body: TransactionIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    transaction_type = body.transaction_type.upper()
+    if transaction_type not in ("INCOME", "EXPENSE"):
+        raise HTTPException(status_code=400, detail="transaction_type must be INCOME or EXPENSE")
+    try:
+        transaction_date = date.fromisoformat(body.transaction_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="transaction_date must use YYYY-MM-DD")
+    category_type = "INCOME" if transaction_type == "INCOME" else "EXPENSE"
+    category_id = _category_id(db, user.id, body.category or "Uncategorized", category_type)
+    row = db.execute(text("""
+        INSERT INTO transactions (
+            user_id, category_id, amount, transaction_type, description,
+            transaction_date, payment_method, is_recurring, merchant_name,
+            status, source
+        ) VALUES (
+            :u, :c, :a, :t, :d, :dt, :pm, :rec, :merchant,
+            'COMPLETED', 'MANUAL'
+        ) RETURNING id
+    """), {
+        "u": user.id, "c": category_id, "a": body.amount, "t": transaction_type,
+        "d": body.description, "dt": transaction_date, "pm": body.payment_method,
+        "rec": body.is_recurring, "merchant": body.merchant_name or body.description
+    }).one()
+    db.commit()
+    return {"id": row[0], "status": "saved"}
+
+
+@router.post("/loans")
+def add_loan(body: LoanInData, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    def parse_optional(value):
+        return date.fromisoformat(value) if value else None
+    try:
+        start_date = parse_optional(body.start_date)
+        end_date = parse_optional(body.end_date)
+        next_payment_date = parse_optional(body.next_payment_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Loan dates must use YYYY-MM-DD")
+    row = db.execute(text("""
+        INSERT INTO loans (
+            user_id, loan_type, lender_name, principal_amount, outstanding_amount,
+            interest_rate, tenure_months, minimum_payment, start_date, end_date,
+            next_payment_date, description, is_active
+        ) VALUES (
+            :u, :loan_type, :lender, :principal, :outstanding, :rate, :tenure,
+            :emi, :start_date, :end_date, :next_payment, :description, TRUE
+        ) RETURNING id
+    """), {
+        "u": user.id, "loan_type": body.loan_type, "lender": body.lender_name,
+        "principal": body.principal_amount, "outstanding": body.outstanding_amount,
+        "rate": body.interest_rate, "tenure": body.tenure_months,
+        "emi": body.minimum_payment, "start_date": start_date, "end_date": end_date,
+        "next_payment": next_payment_date, "description": body.description
+    }).one()
+    db.commit()
+    return {"id": row[0], "status": "saved"}
+
+
+@router.post("/family/members")
+def add_family_member(body: FamilyMemberIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        dob = date.fromisoformat(body.date_of_birth) if body.date_of_birth else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_of_birth must use YYYY-MM-DD")
+    row = db.execute(text("""
+        INSERT INTO family_members (
+            user_id, name, relationship, date_of_birth, is_dependent,
+            monthly_expense, description
+        ) VALUES (
+            :u, :name, :relationship, :dob, :dependent, :monthly_expense, :description
+        ) RETURNING id
+    """), {
+        "u": user.id, "name": body.name, "relationship": body.relationship,
+        "dob": dob, "dependent": body.is_dependent,
+        "monthly_expense": body.monthly_expense, "description": body.description
+    }).one()
+    db.commit()
+    return {"id": row[0], "status": "saved"}
+
+
+@router.post("/family/future-expenses")
+def add_future_expense(body: FutureExpenseIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    try:
+        expected_date = date.fromisoformat(body.expected_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="expected_date must use YYYY-MM-DD")
+    row = db.execute(text("""
+        INSERT INTO future_expenses (
+            user_id, expense_name, expense_category, expected_amount,
+            expected_date, priority, description, is_completed
+        ) VALUES (
+            :u, :name, :category, :amount, :expected_date, :priority, :description, FALSE
+        ) RETURNING id
+    """), {
+        "u": user.id, "name": body.expense_name, "category": body.expense_category,
+        "amount": body.expected_amount, "expected_date": expected_date,
+        "priority": body.priority, "description": body.description
+    }).one()
+    db.commit()
+    return {"id": row[0], "status": "saved"}
 
 
 # ---------------------------------------------------------------- main payload

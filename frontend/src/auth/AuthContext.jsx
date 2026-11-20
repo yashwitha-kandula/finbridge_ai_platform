@@ -1,7 +1,13 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 
 const AuthContext = createContext(null)
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8001'
+
+function clearUserData() {
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('finbridge_'))
+    .forEach((key) => localStorage.removeItem(key))
+}
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('finbridge_token'))
@@ -41,6 +47,7 @@ export function AuthProvider({ children }) {
   }, [token, refreshUser])
 
   const login = useCallback(async (email, password) => {
+    clearUserData()
     const body = new URLSearchParams({ username: email, password })
     const res = await fetch(`${API}/api/auth/login`, {
       method: 'POST',
@@ -53,6 +60,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const register = useCallback(async (payload) => {
+    clearUserData()
     const res = await fetch(`${API}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -64,6 +72,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const socialLogin = useCallback(async (provider, oauthToken, email, name) => {
+    clearUserData()
     const res = await fetch(`${API}/api/auth/social`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -75,7 +84,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const logout = useCallback(() => {
-    localStorage.removeItem('finbridge_token')
+    clearUserData()
     setToken(null)
     setUser(null)
   }, [])

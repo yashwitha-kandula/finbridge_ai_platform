@@ -4,7 +4,7 @@ import pandas as pd
 import altair as alt
 
 st.set_page_config(page_title="FinBridge AI", page_icon="💰", layout="wide")
-API_BASE = "http://localhost:8000"
+API_BASE = "http://localhost:8001"
 
 # --- Session State Initialization ---
 if "demo_data" not in st.session_state:
@@ -46,7 +46,7 @@ page = st.sidebar.radio("Navigation", [
 # --- Data Selection Logic ---
 if mode == "Demo (Simulated Data)":
     if not st.session_state.demo_data:
-        st.error("Backend not reachable. Is FastAPI running on port 8000?")
+        st.error("Backend not reachable. Is FastAPI running on port 8001?")
         st.stop()
     tx_list = st.session_state.demo_data["transactions"]
     loans_list = st.session_state.demo_data["loans"]

@@ -6,6 +6,8 @@ import {
 } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { useNotification } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext'
+import { authFetch } from '../lib/api'
 
 const LOAN_COLORS = {
   'Home Loan': '#7c3aed', // purple-600
@@ -16,36 +18,48 @@ const LOAN_COLORS = {
 
 export default function Debts() {
   const { notify } = useNotification()
+  const { token } = useAuth()
   const [toast, setToast] = useState(null)
-  const [savedLoans, setSavedLoans] = useState([
-    { type: 'Home Loan', amount: 3462450, emi: 28745, rate: 8.65 }
-  ])
+  const [savedLoans, setSavedLoans] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('finbridge_loans') || '[]') } catch { return [] }
+  })
 
   // Form State
-  const [form, setForm] = useState({
-    loanType: 'Home Loan',
-    lender: 'HDFC Bank',
-    accountNo: 'HL1234567890',
-    totalAmount: '3500000',
-    disbursedAmount: '3500000',
-    disbursedDate: '2024-05-01',
-    interestRate: '8.65',
-    tenure: '20',
-    emiAmount: '28745',
-    startDate: '2024-05-01',
-    endDate: '2044-05-01',
+  const [form, setForm] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('finbridge_loan_draft'))
+      if (saved) return { ...saved, tenureUnit: saved.tenureUnit === 'Months' ? 'Months' : 'Years' }
+    } catch {}
+    return {
+    loanType: '',
+    lender: '',
+    accountNo: '',
+    totalAmount: '',
+    disbursedAmount: '',
+    disbursedDate: '',
+    interestRate: '',
+    tenure: '',
+    tenureUnit: 'Years',
+    emiAmount: '',
+    startDate: '',
+    endDate: '',
     paymentMode: 'Auto Debit (NACH)',
     emiDay: '5th of every month',
-    linkedBank: 'HDFC Bank - 4587',
-    outstandingAmount: '3462450',
-    nextEmiDate: '2024-06-05',
-    remainingTenure: '19 Years 11 Months',
+    linkedBank: '',
+    outstandingAmount: '',
+    nextEmiDate: '',
+    remainingTenure: '',
     emiType: 'Fixed EMI',
-    purpose: 'Purchase of Flat',
-    propertyDetails: '2 BHK Apartment, Bangalore',
-    insuranceLinked: 'Yes',
-    notes: 'Home loan for apartment in Whitefield, Bangalore.'
+    purpose: '',
+    propertyDetails: '',
+    insuranceLinked: 'No',
+    notes: ''
+    }
   })
+
+  useEffect(() => {
+    localStorage.setItem('finbridge_loan_draft', JSON.stringify(form))
+  }, [form])
 
   // Dynamic Summary Calcs
   const totalDebt = savedLoans.reduce((sum, loan) => sum + loan.amount, 0)
@@ -75,7 +89,7 @@ export default function Debts() {
     }
   }, [toast])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.outstandingAmount || !form.loanType) {
       notify({
         title: 'Missing Required Fields',
@@ -93,6 +107,29 @@ export default function Debts() {
     }
 
     setSavedLoans([newLoan, ...savedLoans])
+    const updatedLoans = [newLoan, ...savedLoans]
+    localStorage.setItem('finbridge_loans', JSON.stringify(updatedLoans))
+    try {
+      await authFetch(token, '/api/dashboard/loans', {
+        method: 'POST',
+        body: JSON.stringify({
+          loan_type: form.loanType,
+          lender_name: form.lender || 'Other',
+          principal_amount: parseFloat(form.totalAmount) || 0,
+          outstanding_amount: parseFloat(form.outstandingAmount) || 0,
+          interest_rate: parseFloat(form.interestRate) || 0,
+          tenure_months: Math.round((parseFloat(form.tenure) || 0) * (form.tenureUnit === 'Months' ? 1 : 12)),
+          minimum_payment: parseFloat(form.emiAmount) || 0,
+          start_date: form.startDate || null,
+          end_date: form.endDate || null,
+          next_payment_date: form.nextEmiDate || null,
+          description: form.notes || ''
+        })
+      })
+      window.dispatchEvent(new Event('finbridge_data_changed'))
+    } catch (err) {
+      notify({ title: 'Saved Locally', message: err.message, type: 'error' })
+    }
     notify({
       title: 'Loan Saved',
       message: `${form.loanType} details saved successfully!`,
@@ -155,29 +192,32 @@ export default function Debts() {
                   <InputLabel text="Loan Type" required />
                   <div className="relative">
                     <Home size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input list="loan-types" value={form.loanType} onChange={e => handleChange('loanType', e.target.value)} className={`${inputCls} pl-9`} placeholder="e.g. Home Loan" />
-                    <datalist id="loan-types">
-                      <option value="Home Loan" />
-                      <option value="Personal Loan" />
-                      <option value="Credit Card" />
-                      <option value="Education Loan" />
-                      <option value="Auto Loan" />
-                      <option value="Informal Loan" />
-                    </datalist>
+                    <select value={form.loanType} onChange={e => handleChange('loanType', e.target.value)} className={`${inputCls} appearance-none pl-9 pr-8`}>
+                      <option value="">Select loan type</option>
+                      <option value="Home Loan">Home Loan</option>
+                      <option value="Personal Loan">Personal Loan</option>
+                      <option value="Credit Card">Credit Card</option>
+                      <option value="Education Loan">Education Loan</option>
+                      <option value="Auto Loan">Auto Loan</option>
+                      <option value="Informal Loan">Informal Loan</option>
+                    </select>
+                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
                 <div>
-                  <InputLabel text="Lender / Institution" required />
+                  <InputLabel text="Lender / Institution (Optional)" />
                   <div className="relative">
                     <Building2 size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input list="lenders" value={form.lender} onChange={e => handleChange('lender', e.target.value)} className={`${inputCls} pl-9`} placeholder="e.g. HDFC Bank" />
-                    <datalist id="lenders">
-                      <option value="HDFC Bank" />
-                      <option value="SBI" />
-                      <option value="ICICI Bank" />
-                      <option value="Axis Bank" />
-                      <option value="Bajaj Finserv" />
-                    </datalist>
+                    <select value={form.lender} onChange={e => handleChange('lender', e.target.value)} className={`${inputCls} appearance-none pl-9 pr-8`}>
+                      <option value="">Select lender</option>
+                      <option value="HDFC Bank">HDFC Bank</option>
+                      <option value="SBI">SBI</option>
+                      <option value="ICICI Bank">ICICI Bank</option>
+                      <option value="Axis Bank">Axis Bank</option>
+                      <option value="Bajaj Finserv">Bajaj Finserv</option>
+                      <option value="Other / Informal">Other / Informal</option>
+                    </select>
+                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
                 <div>
@@ -206,8 +246,26 @@ export default function Debts() {
                   <input type="number" step="0.01" value={form.interestRate} onChange={e => handleChange('interestRate', e.target.value)} className={`${inputCls} pl-3`} />
                 </div>
                 <div>
-                  <InputLabel text="Loan Tenure (Years)" required />
-                  <input type="number" value={form.tenure} onChange={e => handleChange('tenure', e.target.value)} className={`${inputCls} pl-3`} />
+                  <InputLabel text="Loan Tenure" required />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      step={form.tenureUnit === 'Months' ? '1' : '0.1'}
+                      value={form.tenure}
+                      onChange={e => handleChange('tenure', e.target.value)}
+                      className={`${inputCls} min-w-0 pl-3`}
+                    />
+                    <select
+                      value={form.tenureUnit}
+                      onChange={e => handleChange('tenureUnit', e.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      aria-label="Loan tenure unit"
+                    >
+                      <option value="Months">Months</option>
+                      <option value="Years">Years</option>
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <InputLabel text="EMI Amount (₹)" required />
@@ -260,14 +318,10 @@ export default function Debts() {
                   </div>
                 </div>
                 <div>
-                  <InputLabel text="Linked Bank Account" />
+                  <InputLabel text="Linked Bank Account (Optional)" />
                   <div className="relative">
                     <Building2 size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input list="bank-list" value={form.linkedBank} onChange={e => handleChange('linkedBank', e.target.value)} className={`${inputCls} pl-9`} placeholder="e.g. HDFC Bank" />
-                    <datalist id="bank-list">
-                      <option value="HDFC Bank - 4587" />
-                      <option value="ICICI Bank - 9021" />
-                    </datalist>
+                    <input value={form.linkedBank} onChange={e => handleChange('linkedBank', e.target.value)} className={`${inputCls} pl-9`} placeholder="Optional institution label" />
                   </div>
                 </div>
                 <div>

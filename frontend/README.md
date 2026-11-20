@@ -4,7 +4,7 @@
 ```powershell
 cd frontend
 npm install
-npm run dev      # http://localhost:5173  (backend must be on :8000)
+npm run dev      # http://localhost:5173  (backend must be on :8001)
 npm run build    # production build -> dist/
 ```
 Set `VITE_API_URL` to point at a different backend.

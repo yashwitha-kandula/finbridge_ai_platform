@@ -7,24 +7,8 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { useNotification } from '../context/NotificationContext'
 
-const defaultExpenses = [
-  { id: 1, name: 'Food & Dining', type: 'Essential', active: true },
-  { id: 2, name: 'Transport & Fuel', type: 'Essential', active: true },
-  { id: 3, name: 'Housing & Utilities', type: 'Essential', active: true },
-  { id: 4, name: 'Healthcare', type: 'Essential', active: true },
-  { id: 5, name: 'Shopping', type: 'Non-Essential', active: true },
-  { id: 6, name: 'Entertainment', type: 'Non-Essential', active: true },
-  { id: 7, name: 'Personal Care', type: 'Non-Essential', active: true },
-  { id: 8, name: 'Education', type: 'Essential', active: true }
-]
-
-const defaultIncomes = [
-  { id: 101, name: 'Salary / Wages', type: 'Primary', active: true },
-  { id: 102, name: 'Freelance / Contract', type: 'Secondary', active: true },
-  { id: 103, name: 'Investments / Dividends', type: 'Secondary', active: true },
-  { id: 104, name: 'Rental Income', type: 'Secondary', active: true },
-  { id: 105, name: 'Other Income', type: 'Other', active: true }
-]
+const defaultExpenses = []
+const defaultIncomes = []
 
 const Toggle = ({ enabled, onChange }) => (
   <button

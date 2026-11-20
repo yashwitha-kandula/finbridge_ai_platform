@@ -1,4 +1,4 @@
-export const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+export const API = import.meta.env.VITE_API_URL || 'http://localhost:8001'
 
 /** JSON fetch with bearer token. Throws Error(message) with the server's detail. */
 export async function authFetch(token, path, options = {}) {
@@ -13,7 +13,7 @@ export async function authFetch(token, path, options = {}) {
       },
     })
   } catch {
-    throw new Error('Cannot reach the server. Make sure the backend is running on port 8000.')
+    throw new Error('Cannot reach the server. Make sure the backend is running on port 8001.')
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {

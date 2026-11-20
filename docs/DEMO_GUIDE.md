@@ -3,7 +3,7 @@
 ## 0. Before the panel
 ```powershell
 # Terminal 1 — backend (from finbridge_ai_platform/)
-python -m uvicorn backend.app.main:app --port 8000
+python -m uvicorn backend.app.main:app --port 8001
 # Terminal 2 — frontend
 cd frontend; npm install; npm run dev
 # Terminal 3 — proof
@@ -27,7 +27,7 @@ No login is needed. Authentication is future scope.
 | 6 | Recommendations | Explainable cards | Improve savings (5.56%) · Review high-interest debt (Gold 18%) · Review largest category (Rent) |
 | 7 | AI Assistant | Click the suggestion chips | "How much did I spend?" → ₹34,000 (same as the dashboard). "Which loan…" → Gold loan |
 | 8 | Theme | Header toggle | Light / Dark / System (System is the default) |
-| 9 | Swagger | http://localhost:8000/docs | Every endpoint is live |
+| 9 | Swagger | http://localhost:8001/docs | Every endpoint is live |
 
 ## 3. Viva talking points
 - **Grounding:** the assistant calls the same analytics functions as the dashboard. `e2e_check.py` asserts that the AI's number equals the analytics number, and that it refuses to forecast without history.

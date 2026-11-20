@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Briefcase, ChevronUp, ChevronDown, DollarSign, Activity, Lock,
   Lightbulb, CheckCircle2, Star, Building2, Calendar, CreditCard, Info
 } from 'lucide-react'
 import { inr } from '../lib/format'
 import { useNotification } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext'
+import { authFetch } from '../lib/api'
 
 /* --- UI Components --- */
 function Toggle({ active, onChange }) {
@@ -84,41 +86,49 @@ function SelectField({ label, value, onChange, options }) {
   )
 }
 
+const loadStored = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback } catch { return fallback }
+}
+
 /* --- Main Page --- */
 export default function Income() {
   const { notify } = useNotification()
-  // Pre-fill with the mock values to exactly match the design
-  const [primary, setPrimary] = useState({
-    employer: 'TechSolutions Pvt. Ltd.',
-    monthly: '120000',
-    ctc: '1800000',
-    date: '5th of every month',
+  const { token } = useAuth()
+  const [primary, setPrimary] = useState(() => loadStored('finbridge_income_primary', {
+    employer: '',
+    monthly: '',
+    ctc: '',
+    date: '1st of every month',
     freq: 'Monthly',
     mode: 'Bank Transfer',
-    bank: 'HDFC Bank',
-    account: '4587',
-    pan: 'ABCDE1234F'
-  })
+    bank: '',
+    account: '',
+    pan: ''
+  }))
 
-  const [addl, setAddl] = useState({
-    freelance: true,
-    freelanceAmt: '20000',
+  const [addl, setAddl] = useState(() => loadStored('finbridge_income_additional', {
+    freelance: false,
+    freelanceAmt: '',
     freelanceFreq: 'Variable',
     freelanceDate: '2024-06-28',
     bonus: false,
-    bonusAmt: '120000',
+    bonusAmt: '',
     bonusMonth: 'March',
-    other: true,
+    other: false,
     otherType: 'House Rent',
-    otherAmt: '15000'
-  })
+    otherAmt: ''
+  }))
 
-  const [stability, setStability] = useState({
+  const [stability, setStability] = useState(() => loadStored('finbridge_income_stability', {
     job: 'High (Permanent)',
-    growth: '8.0',
+    growth: '',
     predict: 'Very Predictable',
-    notes: 'Expect promotion next year.'
-  })
+    notes: ''
+  }))
+
+  useEffect(() => localStorage.setItem('finbridge_income_primary', JSON.stringify(primary)), [primary])
+  useEffect(() => localStorage.setItem('finbridge_income_additional', JSON.stringify(addl)), [addl])
+  useEffect(() => localStorage.setItem('finbridge_income_stability', JSON.stringify(stability)), [stability])
 
   // Calculations for summary
   const pSal = Number(primary.monthly) || 0
@@ -148,8 +158,8 @@ export default function Income() {
               <SelectField label="Salary Frequency" value={primary.freq} onChange={(e) => setPrimary({ ...primary, freq: e.target.value })} options={['Monthly', 'Bi-weekly', 'Weekly']} />
               <SelectField label="Payment Mode" value={primary.mode} onChange={(e) => setPrimary({ ...primary, mode: e.target.value })} options={['Bank Transfer', 'Cheque', 'Cash']} />
               
-              <InputField label="Bank Name" icon={Building2} value={primary.bank} onChange={(e) => setPrimary({ ...primary, bank: e.target.value })} />
-              <InputField label="Account Number (Last 4 Digits)" prefix="••••" value={primary.account} onChange={(e) => setPrimary({ ...primary, account: e.target.value })} />
+              <InputField label="Bank Name (Optional)" icon={Building2} value={primary.bank} onChange={(e) => setPrimary({ ...primary, bank: e.target.value })} />
+              <InputField label="Account Number (Last 4 Digits, Optional)" prefix="••••" value={primary.account} onChange={(e) => setPrimary({ ...primary, account: e.target.value })} />
               <InputField label="PAN (Optional)" value={primary.pan} onChange={(e) => setPrimary({ ...primary, pan: e.target.value })} />
             </div>
             
@@ -223,6 +233,9 @@ export default function Income() {
           <div className="flex items-center justify-between pt-2">
             <button
               onClick={() => {
+                setPrimary({ employer: '', monthly: '', ctc: '', date: '1st of every month', freq: 'Monthly', mode: 'Bank Transfer', bank: '', account: '', pan: '' })
+                setAddl({ freelance: false, freelanceAmt: '', freelanceFreq: 'Variable', freelanceDate: '', bonus: false, bonusAmt: '', bonusMonth: 'March', other: false, otherType: 'House Rent', otherAmt: '' })
+                setStability({ job: 'High (Permanent)', growth: '', predict: 'Very Predictable', notes: '' })
                 notify({
                   title: 'Income Form Reset',
                   message: 'Income details have been reset to default values.',
@@ -234,12 +247,57 @@ export default function Income() {
               Reset
             </button>
             <button
-              onClick={() => {
-                notify({
-                  title: 'Income Streams Updated',
-                  message: `Recorded monthly income of ₹${total.toLocaleString('en-IN')}/mo into your profile.`,
-                  type: 'success'
-                })
+              onClick={async () => {
+                const sources = [
+                  pSal > 0 && { amount: pSal, category: 'Salary / Wages', description: primary.employer ? `Salary from ${primary.employer}` : 'Primary salary' },
+                  fSal > 0 && { amount: fSal, category: 'Freelance / Contract', description: 'Freelance / side income' },
+                  oSal > 0 && { amount: oSal, category: addl.otherType, description: addl.otherType }
+                ].filter(Boolean)
+                if (!sources.length) {
+                  notify({ title: 'No Income Entered', message: 'Enter at least one income amount.', type: 'error' })
+                  return
+                }
+                try {
+                  for (const source of sources) {
+                    await authFetch(token, '/api/dashboard/transactions', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        amount: source.amount,
+                        transaction_type: 'INCOME',
+                        category: source.category,
+                        description: source.description,
+                        merchant_name: source.description,
+                        transaction_date: new Date().toISOString().slice(0, 10),
+                        payment_method: primary.mode || 'Bank Transfer',
+                        is_recurring: true
+                      })
+                    })
+                  }
+                  const historyKey = 'finbridge_tx_history'
+                  let history = []
+                  try { history = JSON.parse(localStorage.getItem(historyKey) || '[]') } catch {}
+                  const localEntries = sources.map((source) => ({
+                    id: Date.now() + Math.random(),
+                    rawDate: new Date().toISOString().slice(0, 10),
+                    date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+                    desc: source.description,
+                    category: source.category,
+                    amountNum: source.amount,
+                    isNegative: false,
+                    type: 'INCOME',
+                    amt: `+₹${source.amount.toLocaleString('en-IN')}`,
+                    status: 'Completed'
+                  }))
+                  localStorage.setItem(historyKey, JSON.stringify([...localEntries, ...history]))
+                  window.dispatchEvent(new Event('finbridge_data_changed'))
+                  notify({
+                    title: 'Income Streams Updated',
+                    message: `Recorded monthly income of ₹${total.toLocaleString('en-IN')}/mo.`,
+                    type: 'success'
+                  })
+                } catch (err) {
+                  notify({ title: 'Income Not Saved', message: err.message, type: 'error' })
+                }
               }}
               className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >

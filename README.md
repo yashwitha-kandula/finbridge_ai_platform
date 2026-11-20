@@ -17,7 +17,7 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the per-module evidence
 ```powershell
 pip install -r backend/requirements.txt
 copy backend\.env.example backend\.env      # then set DATABASE_URL
-python -m uvicorn backend.app.main:app --port 8000      # API + Swagger: http://localhost:8000/docs
+python -m uvicorn backend.app.main:app --port 8001      # API + Swagger: http://localhost:8001/docs
 cd frontend; npm install; npm run dev                    # UI: http://localhost:5173
 python -m pytest                                         # tests
 python scripts/e2e_check.py                              # end-to-end demo check (backend + frontend running)

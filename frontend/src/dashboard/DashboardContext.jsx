@@ -28,6 +28,12 @@ export function DashboardProvider({ children }) {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    const onFinanceChanged = () => load()
+    window.addEventListener('finbridge_data_changed', onFinanceChanged)
+    return () => window.removeEventListener('finbridge_data_changed', onFinanceChanged)
+  }, [load])
+
   return (
     <Ctx.Provider value={{ data, loading, error, reload: load,
                            trendMonths, setTrendMonths, breakdown, setBreakdown }}>

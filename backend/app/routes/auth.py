@@ -121,6 +121,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None:
         raise credentials_exception
+    if hasattr(user, "is_active") and not user.is_active:
+        raise credentials_exception
     return user
 
 # In-memory password-reset token store and OTP store
@@ -164,6 +166,8 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if hasattr(user, "is_active") and not user.is_active:
+        raise HTTPException(status_code=403, detail="This account is deactivated")
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -242,6 +246,8 @@ async def social_auth(req: SocialAuthRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
     else:
+        if hasattr(user, "is_active") and not user.is_active:
+            raise HTTPException(status_code=403, detail="This account is deactivated")
         # Update name if it was a placeholder
         if user.full_name in (None, "", "Google User", "Microsoft User", "Apple User"):
             user.full_name = verified_name
@@ -386,6 +392,15 @@ def change_password(
     return {"status": "ok", "message": "Password changed successfully"}
 
 # ── Profile ───────────────────────────────────────────────────────
+
+@router.post("/deactivate")
+def deactivate_account(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    current_user.is_active = False
+    db.commit()
+    return {"status": "ok", "message": "Your FinBridge account has been deactivated"}
 
 @router.get("/me")
 def read_users_me(current_user: models.User = Depends(get_current_user)):

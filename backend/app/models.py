@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, func
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -15,6 +15,7 @@ class User(Base):
     dob = Column(String, nullable=True)
     profession = Column(String, default="Software Engineer")
     income_type = Column(String, default="Salary / Fixed Income")
+    is_active = Column(Boolean, default=True)
     cibil_score = Column(Integer, default=None)
     plaid_access_token = Column(String, nullable=True)
     
@@ -56,3 +57,12 @@ class FinancialGoal(Base):
     target_date = Column(String)
     
     owner = relationship("User", back_populates="goals")
+
+class AssistantChat(Base):
+    __tablename__ = "assistant_chats"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(120), nullable=False)
+    messages = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

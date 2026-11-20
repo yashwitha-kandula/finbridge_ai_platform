@@ -1,6 +1,6 @@
 """
 FinBridge AI - end-to-end smoke test.
-Run with backend on :8000 (and optionally frontend on :5173):
+Run with backend on :8001 (and optionally frontend on :5173):
     python scripts/e2e_check.py
 Follows the demo flow: health -> DB -> demo data -> analytics -> forecast
 -> debt -> goals -> recommendations -> AI assistant (grounding check) -> frontend.
@@ -9,7 +9,7 @@ import json
 import sys
 import urllib.request
 
-API = "http://localhost:8000"
+API = "http://localhost:8001"
 ok = True
 
 

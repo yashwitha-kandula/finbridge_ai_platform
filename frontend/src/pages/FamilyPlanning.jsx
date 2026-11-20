@@ -5,22 +5,8 @@ import {
   Lightbulb, CheckCircle2, ChevronRight, X, Calendar
 } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
-
-const defaultMembers = [
-  { id: 1, name: 'Arjun Kumar (You)', rel: 'Self', dob: '1996-06-15', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Arjun&backgroundColor=b6e3f4' },
-  { id: 2, name: 'Priya Sharma', rel: 'Spouse', dob: '1997-09-22', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya&backgroundColor=ffdfbf' },
-  { id: 3, name: 'Aarav Kumar', rel: 'Son', dob: '2022-03-10', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aarav&backgroundColor=c0aede' },
-  { id: 4, name: 'Ananya Kumar', rel: 'Daughter', dob: '2024-07-18', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ananya&backgroundColor=ffdfbf' },
-]
-
-const defaultExpenses = [
-  { id: 1, type: 'Higher Education', for: 'Aarav Kumar', year: 2040, todayValue: 1020000, priority: 'High', icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-100 dark:bg-indigo-950/60' },
-  { id: 2, type: 'Higher Education', for: 'Ananya Kumar', year: 2042, todayValue: 1090000, priority: 'High', icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-100 dark:bg-indigo-950/60' },
-  { id: 3, type: 'Marriage', for: 'Aarav Kumar', year: 2048, todayValue: 660000, priority: 'Medium', icon: Heart, color: 'text-pink-600', bg: 'bg-pink-100 dark:bg-pink-950/60' },
-  { id: 4, type: 'Marriage', for: 'Ananya Kumar', year: 2050, todayValue: 630000, priority: 'Medium', icon: Heart, color: 'text-pink-600', bg: 'bg-pink-100 dark:bg-pink-950/60' },
-  { id: 5, type: 'Parents\' Retirement Care', for: 'Parents', year: 2035, todayValue: 640000, priority: 'Medium', icon: CalendarHeart, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-950/60' },
-  { id: 6, type: 'Family Vacation Fund', for: 'Family', year: 'Every Year', todayValue: 200000, priority: 'Low', icon: Plane, color: 'text-orange-600', bg: 'bg-orange-100 dark:bg-orange-950/60' },
-]
+import { useAuth } from '../auth/AuthContext'
+import { authFetch } from '../lib/api'
 
 const PRIORITY_COLORS = {
   High: '#ef4444',
@@ -29,26 +15,34 @@ const PRIORITY_COLORS = {
 }
 
 export default function FamilyPlanning() {
+  const { token } = useAuth()
   const [toast, setToast] = useState(null)
   const [members, setMembers] = useState(() => {
     const saved = localStorage.getItem('finbridge_family_members')
-    return saved ? JSON.parse(saved) : defaultMembers
+    return saved ? JSON.parse(saved) : []
   })
   const [expenses, setExpenses] = useState(() => {
     const saved = localStorage.getItem('finbridge_family_expenses')
-    return saved ? JSON.parse(saved) : defaultExpenses
+    return saved ? JSON.parse(saved) : []
   })
   const [inflationRate, setInflationRate] = useState(6.00)
 
   // Modals State
   const [showMemberModal, setShowMemberModal] = useState(false)
-  const [memberForm, setMemberForm] = useState({ id: null, name: '', rel: 'Child', dob: '2015-05-10' })
+  const [memberForm, setMemberForm] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('finbridge_family_member_draft')) || { id: null, name: '', rel: 'Child', dob: '' } } catch { return { id: null, name: '', rel: 'Child', dob: '' } }
+  })
 
   const [showExpenseModal, setShowExpenseModal] = useState(false)
-  const [expenseForm, setExpenseForm] = useState({ id: null, type: '', for: 'Family', year: 2030, todayValue: 500000, priority: 'Medium' })
+  const [expenseForm, setExpenseForm] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('finbridge_family_expense_draft')) || { id: null, type: '', for: 'Family', year: 2030, todayValue: 0, priority: 'Medium' } } catch { return { id: null, type: '', for: 'Family', year: 2030, todayValue: 0, priority: 'Medium' } }
+  })
 
   const [showInflationModal, setShowInflationModal] = useState(false)
   const [tempInflation, setTempInflation] = useState('6.00')
+
+  useEffect(() => localStorage.setItem('finbridge_family_member_draft', JSON.stringify(memberForm)), [memberForm])
+  useEffect(() => localStorage.setItem('finbridge_family_expense_draft', JSON.stringify(expenseForm)), [expenseForm])
 
   const currentYear = new Date().getFullYear()
 
@@ -86,7 +80,7 @@ export default function FamilyPlanning() {
   // Derived Totals
   const totalTodayValue = expenses.reduce((acc, curr) => acc + curr.todayValue, 0)
   const totalFutureCost = expenses.reduce((acc, curr) => acc + getFutureCost(curr.todayValue, curr.year), 0)
-  const annualPlanningNeed = 425000
+  const annualPlanningNeed = expenses.length > 0 ? Math.round(totalFutureCost / Math.max(expenses.length, 1)) : 0
 
   // Chart Data
   const chartData = useMemo(() => {
@@ -113,7 +107,7 @@ export default function FamilyPlanning() {
 
   // Member Handlers
   const handleOpenAddMember = () => {
-    setMemberForm({ id: null, name: '', rel: 'Child', dob: '2015-05-10' })
+    setMemberForm({ id: null, name: '', rel: 'Child', dob: '' })
     setShowMemberModal(true)
   }
 
@@ -122,7 +116,7 @@ export default function FamilyPlanning() {
     setShowMemberModal(true)
   }
 
-  const handleSaveMember = (e) => {
+  const handleSaveMember = async (e) => {
     e.preventDefault()
     if (!memberForm.name.trim()) return showToast('Please enter member name')
 
@@ -141,6 +135,22 @@ export default function FamilyPlanning() {
       showToast('New family member added!')
     }
     setShowMemberModal(false)
+    try {
+      await authFetch(token, '/api/dashboard/family/members', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: memberForm.name.trim(),
+          relationship: memberForm.rel,
+          date_of_birth: memberForm.dob || null,
+          is_dependent: memberForm.rel !== 'Self',
+          monthly_expense: 0,
+          description: ''
+        })
+      })
+      window.dispatchEvent(new Event('finbridge_data_changed'))
+    } catch (err) {
+      showToast(err.message || 'Saved locally, but could not sync')
+    }
   }
 
   const handleDeleteMember = (id) => {
@@ -155,7 +165,7 @@ export default function FamilyPlanning() {
       type: '',
       for: members[0]?.name || 'Family',
       year: currentYear + 5,
-      todayValue: 500000,
+      todayValue: 0,
       priority: 'Medium'
     })
     setShowExpenseModal(true)
@@ -173,7 +183,7 @@ export default function FamilyPlanning() {
     setShowExpenseModal(true)
   }
 
-  const handleSaveExpense = (e) => {
+  const handleSaveExpense = async (e) => {
     e.preventDefault()
     if (!expenseForm.type.trim()) return showToast('Please enter expense type')
 
@@ -203,6 +213,22 @@ export default function FamilyPlanning() {
       showToast('New future expense added!')
     }
     setShowExpenseModal(false)
+    try {
+      await authFetch(token, '/api/dashboard/family/future-expenses', {
+        method: 'POST',
+        body: JSON.stringify({
+          expense_name: expenseForm.type.trim(),
+          expense_category: expenseForm.type.trim(),
+          expected_amount: Number(expenseForm.todayValue) || 0,
+          expected_date: `${expenseForm.year}-01-01`,
+          priority: expenseForm.priority,
+          description: `For ${expenseForm.for}`
+        })
+      })
+      window.dispatchEvent(new Event('finbridge_data_changed'))
+    } catch (err) {
+      showToast(err.message || 'Saved locally, but could not sync')
+    }
   }
 
   const handleDeleteExpense = (id) => {

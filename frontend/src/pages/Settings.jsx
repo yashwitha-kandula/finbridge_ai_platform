@@ -9,6 +9,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../theme/ThemeProvider'
 import { authFetch } from '../lib/api'
 import { COUNTRIES } from '../lib/countries'
+import { API } from '../lib/api'
 
 export default function Settings() {
   const { token, setToken, user, refreshUser, logout } = useAuth()
@@ -63,13 +64,10 @@ export default function Settings() {
   // Tab 2: Accounts State
   const [accounts, setAccounts] = useState(() => {
     const saved = localStorage.getItem('finbridge_connected_accounts')
-    return saved ? JSON.parse(saved) : [
-      { id: 1, bank: 'State Bank of India', accNum: '•••• 4821', type: 'Savings Account', synced: 'Today, 10:30 AM', status: 'Connected', color: 'bg-blue-600' },
-      { id: 2, bank: 'HDFC Bank', accNum: '•••• 8793', type: 'Savings Account', synced: 'Today • 08:45 PM', status: 'Connected', color: 'bg-rose-600' }
-    ]
+    return saved ? JSON.parse(saved) : []
   })
   const [showAddModal, setShowAddModal] = useState(false)
-  const [newAcc, setNewAcc] = useState({ bank: 'ICICI Bank', accNum: '', type: 'Savings Account' })
+  const [newAcc, setNewAcc] = useState({ bank: '', accNum: '', type: '' })
 
   // Tab 3: Preferences State
   const [prefs, setPrefs] = useState(() => {
@@ -123,12 +121,12 @@ export default function Settings() {
 
   // Gemini API Key State
   const [geminiKeyInput, setGeminiKeyInput] = useState('')
-  const [geminiConfig, setGeminiConfig] = useState({ configured: false, masked_key: null, model: 'gemini-1.5-flash' })
+  const [geminiConfig, setGeminiConfig] = useState({ configured: false, masked_key: null, model: 'gemini-3.5-flash-lite', format_valid: false })
   const [testingGemini, setTestingGemini] = useState(false)
   const [geminiTestOutput, setGeminiTestOutput] = useState('')
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/ai/key-status')
+    fetch(`${API}/api/ai/key-status`)
       .then(r => r.json())
       .then(d => { if (d) setGeminiConfig(d) })
       .catch(() => {})
@@ -136,18 +134,19 @@ export default function Settings() {
 
   const handleSaveGeminiKey = async (e) => {
     e.preventDefault()
-    if (!geminiKeyInput.trim() || geminiKeyInput.trim().length < 20) {
-      return showToast('Please enter a valid Google Gemini API Key (starts with AIza...)')
+    const cleanedKey = geminiKeyInput.trim()
+    if (!(cleanedKey.startsWith('AIza') || cleanedKey.startsWith('AQ.')) || cleanedKey.length < 20) {
+      return showToast('Enter a valid Google Gemini API key.')
     }
     try {
-      const res = await fetch('http://localhost:8000/api/ai/save-key', {
+      const res = await fetch(`${API}/api/ai/save-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: geminiKeyInput.trim() })
       })
       const d = await res.json()
       if (d.success) {
-        setGeminiConfig({ configured: true, masked_key: d.masked_key, model: 'gemini-1.5-flash' })
+        setGeminiConfig({ configured: true, masked_key: d.masked_key, model: 'gemini-3.5-flash-lite', format_valid: true })
         setGeminiKeyInput('')
         showToast('Google Gemini API Key connected successfully!')
       } else {
@@ -162,7 +161,7 @@ export default function Settings() {
     setTestingGemini(true)
     setGeminiTestOutput('')
     try {
-      const res = await fetch('http://localhost:8000/api/ai/ask', {
+      const res = await fetch(`${API}/api/ai/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,9 +170,10 @@ export default function Settings() {
         })
       })
       const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Gemini could not answer the test question.')
       setGeminiTestOutput(`[${data.source || 'AI'}]: ${data.answer}`)
-    } catch {
-      setGeminiTestOutput('Error testing Gemini AI. Make sure backend is running on port 8000.')
+    } catch (err) {
+      setGeminiTestOutput(err.message || `Error testing Gemini AI. Make sure the backend is reachable at ${API}.`)
     } finally {
       setTestingGemini(false)
     }
@@ -253,14 +253,14 @@ export default function Settings() {
   // Handle Add Account (Bank & Account No. are optional)
   const handleAddAccount = (e) => {
     e.preventDefault()
-    const bankName = newAcc.bank.trim() || 'Connected Bank'
+    const bankName = newAcc.bank.trim() || 'Financial account'
     const cleanNum = newAcc.accNum ? newAcc.accNum.replace(/\D/g, '') : ''
-    const accDisplay = cleanNum.length >= 4 ? `•••• ${cleanNum.slice(-4)}` : '•••• 0000'
+    const accDisplay = cleanNum.length >= 4 ? `•••• ${cleanNum.slice(-4)}` : ''
     const created = {
       id: Date.now(),
       bank: bankName,
       accNum: accDisplay,
-      type: newAcc.type || 'Savings Account',
+      type: newAcc.type || 'Account type not specified',
       synced: 'Just now',
       status: 'Connected',
       color: 'bg-emerald-600'
@@ -269,8 +269,20 @@ export default function Settings() {
     setAccounts(updated)
     localStorage.setItem('finbridge_connected_accounts', JSON.stringify(updated))
     setShowAddModal(false)
-    setNewAcc({ bank: 'ICICI Bank', accNum: '', type: 'Savings Account' })
-    showToast(`${created.bank} account linked successfully!`)
+    setNewAcc({ bank: '', accNum: '', type: '' })
+    showToast(`${created.bank} details saved`)
+  }
+
+  const handleDeactivateAccount = async () => {
+    if (!window.confirm('Deactivate your FinBridge account? You will be signed out and will not be able to log in until support reactivates it.')) return
+    try {
+      await authFetch(token, '/api/auth/deactivate', { method: 'POST' })
+      showToast('FinBridge account deactivated')
+      logout()
+      navigate('/login')
+    } catch (err) {
+      showToast(err.message || 'Could not deactivate account')
+    }
   }
 
   // Password strength calculation
@@ -392,6 +404,7 @@ export default function Settings() {
                   onChange={(e) => setNewAcc({ ...newAcc, bank: e.target.value })}
                   className="mt-1 block h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
+                  <option value="">Not specified</option>
                   <option>State Bank of India</option>
                   <option>HDFC Bank</option>
                   <option>ICICI Bank</option>
@@ -413,12 +426,13 @@ export default function Settings() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Account Type</label>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Account Type (Optional)</label>
                 <select
                   value={newAcc.type}
                   onChange={(e) => setNewAcc({ ...newAcc, type: e.target.value })}
                   className="mt-1 block h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-600 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
+                  <option value="">Not specified</option>
                   <option>Savings Account</option>
                   <option>Current Account</option>
                   <option>Salary Account</option>
@@ -835,12 +849,12 @@ export default function Settings() {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
-                  geminiConfig.configured
+                  geminiConfig.configured && geminiConfig.format_valid !== false
                     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
                     : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
                 }`}>
-                  <span className={`h-2 w-2 rounded-full ${geminiConfig.configured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                  {geminiConfig.configured ? `Active (${geminiConfig.model || 'Gemini 1.5 Flash'})` : 'API Key Required'}
+                  <span className={`h-2 w-2 rounded-full ${geminiConfig.configured && geminiConfig.format_valid !== false ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                  {geminiConfig.configured && geminiConfig.format_valid !== false ? `Active (${geminiConfig.model || 'Gemini 3.5 Flash-Lite'})` : 'Valid API Key Required'}
                 </span>
               </div>
             </div>
@@ -855,7 +869,7 @@ export default function Settings() {
                   Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="font-bold underline text-blue-700 dark:text-blue-300 inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={11} className="inline" /></a>.
                 </li>
                 <li>Sign in with your Google Account and click <strong>"Create API Key"</strong>.</li>
-                <li>Copy the generated key (it starts with <code className="bg-white/80 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px] font-mono">AIzaSy...</code>) and paste it below.</li>
+                <li>Copy the generated key (it may start with <code className="bg-white/80 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px] font-mono">AIza...</code> or <code className="bg-white/80 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px] font-mono">AQ.</code>) and paste it below.</li>
               </ol>
             </div>
 
@@ -869,16 +883,20 @@ export default function Settings() {
                   <Key size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="password"
-                    placeholder={geminiConfig.masked_key ? `Current Key: ${geminiConfig.masked_key}` : "Paste your Google Gemini API Key here (AIzaSy...)"}
+                    placeholder={geminiConfig.masked_key ? `Current Key: ${geminiConfig.masked_key}` : "Paste your Google Gemini API key"}
                     value={geminiKeyInput}
                     onChange={(e) => setGeminiKeyInput(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-xs font-mono text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
                 {geminiConfig.masked_key && (
-                  <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                    ✓ Connected: {geminiConfig.masked_key}
-                  </p>
+                  geminiConfig.format_valid === false
+                    ? <p className="mt-1 text-[11px] text-red-600 dark:text-red-400 font-semibold">
+                        The saved key is not a valid Google Gemini API key. Replace it with a key starting with AIza...
+                      </p>
+                    : <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                        ✓ Connected: {geminiConfig.masked_key}
+                      </p>
                 )}
               </div>
 
@@ -1147,6 +1165,24 @@ export default function Settings() {
               <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300">
                 <Check className="h-3.5 w-3.5" /> All systems secure
               </span>
+            </div>
+
+            <div className="rounded-2xl border border-red-200 bg-red-50/50 p-5 dark:border-red-950 dark:bg-red-950/20">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-bold text-red-700 dark:text-red-400">Deactivate FinBridge Account</h4>
+                  <p className="mt-1 text-xs text-red-600/80 dark:text-red-300/80">
+                    Disable access to this account and sign out from this device.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDeactivateAccount}
+                  className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+                >
+                  Deactivate
+                </button>
+              </div>
             </div>
           </div>
 

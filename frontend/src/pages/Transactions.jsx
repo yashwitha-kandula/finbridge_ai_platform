@@ -7,9 +7,12 @@ import {
 } from 'lucide-react'
 import Modal, { FormField, fieldCls } from '../components/Modal'
 import { useNotification } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext'
+import { authFetch } from '../lib/api'
 
 export default function Transactions() {
   const { notify } = useNotification()
+  const { token } = useAuth()
   const [isBankLinked, setIsBankLinked] = useState(() => localStorage.getItem('finbridge_bank_linked') === 'true')
   const [showManualForm, setShowManualForm] = useState(false)
 
@@ -19,7 +22,7 @@ export default function Transactions() {
     if (saved) {
       try { return JSON.parse(saved).map(c => c.name) } catch (e) {}
     }
-    return ['Food & Dining', 'Transport & Fuel', 'Housing & Utilities', 'Healthcare', 'Shopping', 'Entertainment', 'Personal Care', 'Education', 'Groceries', 'Bills & Subscriptions']
+    return []
   })
 
   const [incomeCategories, setIncomeCategories] = useState(() => {
@@ -27,7 +30,7 @@ export default function Transactions() {
     if (saved) {
       try { return JSON.parse(saved).map(c => c.name) } catch (e) {}
     }
-    return ['Salary / Wages', 'Freelance / Contract', 'Investments / Dividends', 'Rental Income', 'Business Profit', 'Interest Income', 'Gifts / Bonus', 'Other Income']
+    return []
   })
 
   // Real History - Zero Mock Data: Filter out any legacy dummy records from localStorage
@@ -79,7 +82,12 @@ export default function Transactions() {
   // Form State
   const [txType, setTxType] = useState('Expense')
   const [recurring, setRecurring] = useState(false)
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('finbridge_transaction_draft'))
+      if (saved) return saved
+    } catch {}
+    return {
     amount: '',
     date: new Date().toISOString().split('T')[0],
     category: '',
@@ -89,7 +97,12 @@ export default function Transactions() {
     merchant: '',
     txId: '',
     notes: ''
+    }
   })
+
+  useEffect(() => {
+    localStorage.setItem('finbridge_transaction_draft', JSON.stringify(form))
+  }, [form])
 
   // Bank Modal State
   const [showBankModal, setShowBankModal] = useState(false)
@@ -99,20 +112,39 @@ export default function Transactions() {
   const [bankBusy, setBankBusy] = useState(false)
 
   // Real Bank Input State (for Plaid / Account Aggregator)
-  const [newBankName, setNewBankName] = useState('State Bank of India')
-  const [newBankAccEnding, setNewBankAccEnding] = useState('4587')
+  const [newBankName, setNewBankName] = useState('')
+  const [newBankAccEnding, setNewBankAccEnding] = useState('')
   const [newBankBalance, setNewBankBalance] = useState('')
-  const [newBankType, setNewBankType] = useState('Savings Account')
+  const [newBankType, setNewBankType] = useState('')
+
+  const clearBankForm = () => {
+    setBankStep(1)
+    setBankPhone('')
+    setBankOtp('')
+    setNewBankName('')
+    setNewBankAccEnding('')
+    setNewBankBalance('')
+    setNewBankType('')
+  }
+
+  const closeBankModal = () => {
+    setShowBankModal(false)
+    clearBankForm()
+  }
 
   const handleBankSuccess = () => {
+    if (!newBankName.trim() || !/^\d{4}$/.test(newBankAccEnding.trim())) {
+      notify({ title: 'Missing Bank Details', message: 'Select a bank and enter its 4-digit account ending.', type: 'error' })
+      return
+    }
     const balanceNum = parseFloat(newBankBalance) || 0
     const newBankObj = {
       id: Date.now(),
-      name: newBankName || 'State Bank of India',
-      accNum: `Ending in ${newBankAccEnding || '1234'}`,
+      name: newBankName.trim(),
+      accNum: `Ending in ${newBankAccEnding.trim()}`,
       balance: `₹${balanceNum.toLocaleString('en-IN')}`,
       rawBalance: balanceNum,
-      type: newBankType,
+      type: newBankType || 'Account type not specified',
       logo: (newBankName || 'S').charAt(0).toUpperCase(),
       color: 'text-blue-700 dark:text-blue-400',
       bg: 'bg-blue-100 dark:bg-blue-950/60'
@@ -121,6 +153,7 @@ export default function Transactions() {
     const updatedBanks = [newBankObj, ...banks.filter(b => b.name !== newBankObj.name)]
     setBanks(updatedBanks)
     setShowBankModal(false)
+    clearBankForm()
     setIsBankLinked(true)
     setShowManualForm(false)
 
@@ -129,6 +162,12 @@ export default function Transactions() {
       message: `${newBankObj.name} connected successfully with real balance ₹${balanceNum.toLocaleString('en-IN')}.`,
       type: 'success'
     })
+  }
+
+  const skipBankLink = () => {
+    setShowBankModal(false)
+    clearBankForm()
+    setShowManualForm(true)
   }
 
   const handleRemoveBank = (bankId) => {
@@ -145,7 +184,7 @@ export default function Transactions() {
     })
   }
 
-  const handleSaveTransaction = () => {
+  const handleSaveTransaction = async () => {
     if (!form.amount || !form.category || !form.merchant) {
       notify({
         title: 'Missing Fields',
@@ -177,6 +216,24 @@ export default function Transactions() {
     }
 
     setHistoryTx([newTx, ...historyTx])
+    try {
+      await authFetch(token, '/api/dashboard/transactions', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: amtNum,
+          transaction_type: txType.toUpperCase(),
+          category: form.category,
+          description: form.notes || form.merchant,
+          merchant_name: form.merchant,
+          transaction_date: form.date,
+          payment_method: form.method,
+          is_recurring: recurring
+        })
+      })
+      window.dispatchEvent(new Event('finbridge_data_changed'))
+    } catch (err) {
+      notify({ title: 'Saved Locally', message: err.message, type: 'error' })
+    }
 
     notify({
       title: 'Transaction Saved',
@@ -201,6 +258,7 @@ export default function Transactions() {
 
   const handleDeleteTx = (id) => {
     setHistoryTx(historyTx.filter(t => t.id !== id))
+    window.dispatchEvent(new Event('finbridge_data_changed'))
     notify({
       title: 'Transaction Deleted',
       message: 'The transaction has been removed from your history.',
@@ -609,13 +667,16 @@ export default function Transactions() {
 
       {/* Real Bank Linking Modal (Account Aggregator / Plaid) */}
       {showBankModal && (
-        <Modal title="Secure Bank Connection (Real-Time)" onClose={() => setShowBankModal(false)}>
+        <Modal title="Secure Bank Connection (Real-Time)" onClose={closeBankModal}>
+          <div className="mb-4 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+            Bank linking is optional. Skip it to record transactions manually without sharing phone, OTP, or bank details.
+          </div>
           {bankStep === 1 && (
             <div>
               <div className="mb-4 text-sm text-slate-600 dark:text-slate-400">
                 Enter your mobile number linked to your Indian or international bank accounts to initiate RBI-approved Account Aggregator / Plaid verification.
               </div>
-              <FormField label="Mobile Number">
+              <FormField label="Mobile Number (only needed to link an account)">
                 <div className="flex">
                   <span className="flex items-center justify-center rounded-l-xl border border-r-0 border-slate-300 bg-slate-50 px-3 font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800">
                     +91
@@ -651,7 +712,7 @@ export default function Transactions() {
               <div className="mb-4 text-sm text-slate-600 dark:text-slate-400">
                 Enter the 6-digit confirmation OTP sent to +91 {bankPhone || '••••••••••'}.
               </div>
-              <FormField label="One Time Password">
+              <FormField label="One Time Password (only needed to link an account)">
                 <input
                   type="text"
                   maxLength={6}
@@ -684,12 +745,13 @@ export default function Transactions() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Bank Name *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Bank Name (only needed to link an account)</label>
                 <select
                   value={newBankName}
                   onChange={(e) => setNewBankName(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-xs text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
+                  <option value="" disabled>Select your bank</option>
                   <option value="State Bank of India">State Bank of India (SBI)</option>
                   <option value="HDFC Bank">HDFC Bank</option>
                   <option value="ICICI Bank">ICICI Bank</option>
@@ -706,9 +768,10 @@ export default function Transactions() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Account Ending (4 Digits)</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Account Ending (only needed to link an account)</label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     maxLength={4}
                     value={newBankAccEnding}
                     onChange={(e) => setNewBankAccEnding(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -717,12 +780,13 @@ export default function Transactions() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Account Type</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Account Type (Optional)</label>
                   <select
                     value={newBankType}
                     onChange={(e) => setNewBankType(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-xs text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   >
+                    <option value="">Not specified</option>
                     <option value="Savings Account">Savings Account</option>
                     <option value="Current / Checking">Current / Checking</option>
                     <option value="Salary Account">Salary Account</option>
@@ -732,7 +796,7 @@ export default function Transactions() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Current Real Balance (₹) *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Current Real Balance (₹, only needed to link an account)</label>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₹</span>
                   <input
@@ -746,7 +810,7 @@ export default function Transactions() {
               </div>
 
               <button
-                disabled={bankBusy || !newBankBalance}
+                disabled={bankBusy || !newBankName || !/^\d{4}$/.test(newBankAccEnding) || !newBankBalance}
                 onClick={handleBankSuccess}
                 className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"
               >
@@ -754,6 +818,13 @@ export default function Transactions() {
               </button>
             </div>
           )}
+          <button
+            type="button"
+            onClick={skipBankLink}
+            className="mt-3 w-full rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Skip bank linking and use manual transactions
+          </button>
         </Modal>
       )}
 

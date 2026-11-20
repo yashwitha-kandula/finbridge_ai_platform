@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Sparkles, Send, Mic, Paperclip, ChevronRight, CheckCircle2, TrendingUp, AlertCircle,
+  Sparkles, Send, Mic, Paperclip, ChevronRight, CheckCircle2, TrendingUp, AlertCircle, History, Plus,
   FileText, Calculator, PiggyBank, Receipt, DollarSign, Lightbulb, ArrowUpRight
 } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
@@ -17,53 +17,75 @@ const QUICK_PROMPTS = [
 
 const COLORS = ['#6366f1', '#3b82f6', '#f59e0b', '#10b981', '#06b6d4', '#ef4444']
 
+const createWelcomeMessage = (name = 'there') => ({
+  id: 'welcome',
+  sender: 'ai',
+  text: `Hello ${name}! I'm your FinBridge AI Financial Advisor. Ask me anything about your income, monthly expenses, loan payoffs, or investments.`,
+  time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  hasAnalysis: false
+})
+
 export default function Assistant() {
   const { token, user } = useAuth()
   const userName = user?.full_name ? user.full_name.split(' ')[0] : 'there'
   
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(() => [createWelcomeMessage()])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [dashboardData, setDashboardData] = useState(null)
+  const [chatHistory, setChatHistory] = useState([])
+  const [activeChatId, setActiveChatId] = useState(null)
+  const [historyError, setHistoryError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setChatHistory([])
+    setActiveChatId(null)
+    setMessages([createWelcomeMessage(user?.full_name?.split(' ')[0] || 'there')])
+    setHistoryError('')
+    if (!token) return () => { active = false }
+
+    authFetch(token, '/api/ai/history')
+      .then(data => {
+        if (active) setChatHistory(data.chats || [])
+      })
+      .catch(err => {
+        if (active) setHistoryError(`Could not load chat history: ${err.message}`)
+      })
+
+    return () => { active = false }
+  }, [token, user])
 
   useEffect(() => {
     // Fetch live user financial data
     if (token) {
-      authFetch(token, '/api/dashboard?period=this_month')
+      authFetch(token, '/api/dashboard?breakdown=this_month')
         .then(data => {
           setDashboardData(data)
-          // Set initial greeting dynamically grounded with user's name
-          setMessages([
-            {
-              id: 1,
-              sender: 'ai',
-              text: `Hello ${user?.full_name ? user.full_name.split(' ')[0] : 'there'}! I'm your FinBridge AI Financial Advisor. Ask me anything about your income, monthly expenses, loan payoffs, or investments.`,
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              hasAnalysis: false
-            }
-          ])
         })
         .catch(err => console.error('Failed to load dashboard for assistant', err))
     }
   }, [token, user])
 
   // Derive real expense categories from user database, strictly fallback to empty if none
-  const expenseCategories = dashboardData?.categories && dashboardData.categories.length > 0
-    ? dashboardData.categories.map((c, i) => ({
+  const expenseCategories = dashboardData?.breakdown?.items?.length > 0
+    ? dashboardData.breakdown.items.map((c, i) => ({
         name: c.name,
-        value: Number(c.total) || 0,
+        value: Number(c.amount) || 0,
         color: COLORS[i % COLORS.length]
       }))
     : []
 
-  const totalIncome = Number(dashboardData?.summary?.total_income) || 0
-  const totalExpense = expenseCategories.reduce((acc, c) => acc + c.value, 0) || Number(dashboardData?.summary?.total_expense) || 0
-  const savingsRate = Number(dashboardData?.summary?.savings_rate) || (totalIncome > totalExpense && totalIncome > 0 ? Math.round(((totalIncome - totalExpense) / totalIncome) * 100) : 0)
+  const totalIncome = Number(dashboardData?.cards?.income?.value) || 0
+  const totalExpense = Number(dashboardData?.breakdown?.total ?? dashboardData?.cards?.expenses?.value) || 0
+  const savingsRate = totalIncome > 0
+    ? Math.round(((totalIncome - totalExpense) / totalIncome) * 1000) / 10
+    : 0
   const potentialSavings = Math.round(totalExpense * 0.12) || 0
 
   const handleSend = async (textToSend) => {
     const query = textToSend || input
-    if (!query.trim()) return
+    if (!query.trim() || loading) return
 
     const newMsg = {
       id: Date.now(),
@@ -75,6 +97,34 @@ export default function Assistant() {
     setInput('')
     setLoading(true)
 
+    const saveConversation = async (assistantMessage) => {
+      const conversationMessages = [
+        ...messages.filter(message => message.id !== 'welcome'),
+        newMsg,
+        assistantMessage
+      ].slice(-100)
+      setMessages(conversationMessages)
+
+      try {
+        const savedChat = await authFetch(token, '/api/ai/history', {
+          method: 'POST',
+          body: JSON.stringify({
+            chat_id: activeChatId,
+            title: conversationMessages.find(message => message.sender === 'user')?.text.slice(0, 120) || 'Financial chat',
+            messages: conversationMessages
+          })
+        })
+        setActiveChatId(savedChat.id)
+        setChatHistory(prev => [
+          savedChat,
+          ...prev.filter(chat => chat.id !== savedChat.id)
+        ].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 3))
+        setHistoryError('')
+      } catch (err) {
+        setHistoryError(`Chat received, but history could not be saved: ${err.message}`)
+      }
+    }
+
     try {
       const res = await authFetch(token, '/api/ai/ask', {
         method: 'POST',
@@ -85,35 +135,48 @@ export default function Assistant() {
             total_income: totalIncome,
             total_expense: totalExpense,
             savings_rate: savingsRate,
-            categories: expenseCategories
+            categories: expenseCategories,
+            goals: dashboardData?.goals || [],
+            recent_transactions: dashboardData?.recent || [],
+            upcoming_bills: dashboardData?.bills || [],
+            monthly_trend: dashboardData?.trend || [],
+            has_data: Boolean(dashboardData?.has_data)
           }
         })
       })
 
-      setMessages(prev => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: 'ai',
-          text: res.answer || res.message,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          hasAnalysis: query.toLowerCase().includes('expense') || query.toLowerCase().includes('reduc') || query.toLowerCase().includes('spend')
-        }
-      ])
-    } catch {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: 'ai',
-          text: `Based on your recorded monthly expenses of ₹${totalExpense.toLocaleString('en-IN')}, cutting down on non-essential dining and recurring subscriptions will help you save approximately ₹${potentialSavings.toLocaleString('en-IN')} more per month.`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          hasAnalysis: true
-        }
-      ])
+      await saveConversation({
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: res.answer || res.message,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        hasAnalysis: query.toLowerCase().includes('expense') || query.toLowerCase().includes('reduc') || query.toLowerCase().includes('spend')
+      })
+    } catch (err) {
+      await saveConversation({
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: `I couldn't get a response from the AI service. ${err?.message || 'Please try again.'}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        hasAnalysis: false
+      })
     } finally {
       setLoading(false)
     }
+  }
+
+  const startNewChat = () => {
+    if (loading) return
+    setActiveChatId(null)
+    setMessages([createWelcomeMessage(userName)])
+    setHistoryError('')
+  }
+
+  const openChat = (chat) => {
+    if (loading) return
+    setActiveChatId(chat.id)
+    setMessages(chat.messages)
+    setHistoryError('')
   }
 
   return (
@@ -143,6 +206,16 @@ export default function Assistant() {
               {prompt}
             </button>
           ))}
+          {loading && (
+            <div className="flex items-start gap-3" aria-live="polite">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-5 py-3.5 text-sm text-slate-500 dark:bg-slate-800/60 dark:text-slate-300">
+                Thinking...
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -151,6 +224,46 @@ export default function Assistant() {
         {/* Left Column: Chat & Embedded Analysis */}
         <div className="flex flex-col space-y-6">
           <div className="space-y-6 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <section aria-label="Recent chat history" className="border-b border-slate-100 pb-5 dark:border-slate-800">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-white">
+                  <History className="h-4 w-4 text-blue-600" />
+                  Recent chats <span className="text-xs font-medium text-slate-400">(last 3)</span>
+                </h2>
+                <button
+                  type="button"
+                  onClick={startNewChat}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  <Plus className="h-3.5 w-3.5" /> New chat
+                </button>
+              </div>
+              {historyError && <p role="alert" className="mb-2 text-xs text-rose-600">{historyError}</p>}
+              {chatHistory.length ? (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {chatHistory.map(chat => (
+                    <button
+                      key={chat.id}
+                      type="button"
+                      onClick={() => openChat(chat)}
+                      disabled={loading}
+                      aria-pressed={activeChatId === chat.id}
+                      className={`min-w-0 rounded-xl border p-3 text-left transition disabled:opacity-50 ${
+                        activeChatId === chat.id
+                          ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40'
+                          : 'border-slate-200 hover:border-blue-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-200">{chat.title}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">{new Date(chat.updated_at).toLocaleString()}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Your last three conversations will appear here.</p>
+              )}
+            </section>
             {/* Chat Thread */}
             <div className="space-y-4">
               {messages.map((m) => (

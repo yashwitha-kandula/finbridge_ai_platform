@@ -2,7 +2,7 @@
 ## python -m uvicorn app.main:app --reload - updated after creating schemas.py 
 
 > **Update (2026-10-06):** the routes now import `ml.*` and `backend.*`, so run the server from **`finbridge_ai_platform/`**:
-> `python -m uvicorn backend.app.main:app --reload --port 8000`
+> `python -m uvicorn backend.app.main:app --reload --port 8001`
 
 # Backend (FastAPI)
 
@@ -26,7 +26,7 @@ Copy `backend/.env.example` to `backend/.env` and set `DATABASE_URL`. `.env` is 
 ## Run and test
 ```powershell
 pip install -r backend/requirements.txt
-python -m uvicorn backend.app.main:app --reload --port 8000   # Swagger at http://localhost:8000/docs
+python -m uvicorn backend.app.main:app --reload --port 8001   # Swagger at http://localhost:8001/docs
 python -m pytest tests/test_backend.py
 ```
 

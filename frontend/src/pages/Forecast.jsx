@@ -13,50 +13,16 @@ import {
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { inr, inrShort } from '../lib/format'
+import { API } from '../lib/api'
 import { useNotification } from '../context/NotificationContext'
+import { useDashboard } from '../dashboard/DashboardContext'
 
-/* --- Mock Data --- */
-const trendData = [
-  { month: "May '24", income: 90000, expenses: 60000, savings: 30000 },
-  { month: "Jun '24", income: 105000, expenses: 65000, savings: 40000 },
-  { month: "Jul '24", income: 110000, expenses: 62000, savings: 48000 },
-  { month: "Aug '24", income: 125000, expenses: 72000, savings: 53000 },
-  { month: "Sep '24", income: 130000, expenses: 75000, savings: 55000 },
-  { month: "Oct '24", income: 145000, expenses: 80000, savings: 65000 },
-]
-
-const breakdownData = [
-  { name: 'Housing', value: 131200, percent: 32, color: '#0d9488' },
-  { name: 'Food', value: 73800, percent: 18, color: '#c026d3' },
-  { name: 'Transport', value: 49200, percent: 12, color: '#f59e0b' },
-  { name: 'Shopping', value: 41000, percent: 10, color: '#ec4899' },
-  { name: 'Entertainment', value: 28700, percent: 7, color: '#6366f1' },
-  { name: 'Others', value: 86100, percent: 21, color: '#94a3b8' },
-]
-
-const radarData = [
-  { subject: 'Savings', A: 85, fullMark: 100 },
-  { subject: 'Debt', A: 90, fullMark: 100 },
-  { subject: 'Stability', A: 75, fullMark: 100 },
-  { subject: 'Discipline', A: 80, fullMark: 100 },
-  { subject: 'Growth', A: 70, fullMark: 100 },
-]
-
-const projectionData = [
-  { month: "Nov '24", projected: 40000, target: 50000 },
-  { month: "Dec '24", projected: 65000, target: 70000 },
-  { month: "Jan '25", projected: 90000, target: 90000 },
-  { month: "Feb '25", projected: 115000, target: 110000 },
-  { month: "Mar '25", projected: 140000, target: 130000 },
-  { month: "Apr '25", projected: 162000, target: 150000 },
-]
-
-const events = [
-  { id: 1, title: 'Bike Purchase Goal', date: 'Target: Nov 2024', amount: 120000, icon: Target, color: 'text-teal-500', bg: 'bg-teal-50 dark:bg-teal-500/10' },
-  { id: 2, title: 'Home Loan EMI', date: 'Next: 05 Jun 2024', amount: 18500, icon: Home, color: 'text-rose-500', bg: 'bg-rose-50 dark:bg-rose-500/10' },
-  { id: 3, title: 'Insurance Premium', date: 'Due: 15 Jun 2024', amount: 12000, icon: Shield, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-500/10' },
-  { id: 4, title: 'School Fees', date: 'Due: 20 Jun 2024', amount: 25000, icon: GraduationCap, color: 'text-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-500/10' },
-]
+/* --- Empty by default; values come from live account data --- */
+const trendData = []
+const breakdownData = []
+const radarData = []
+const projectionData = []
+const events = []
 
 const Sparkline = ({ dataKey, color, data }) => (
   <ResponsiveContainer width="100%" height={40}>
@@ -75,19 +41,27 @@ const Sparkline = ({ dataKey, color, data }) => (
 export default function Forecast() {
   const navigate = useNavigate()
   const { notify } = useNotification()
-  const [dateRange, setDateRange] = useState("Last 6 Months (May - Oct 2024)")
+  const { data: dashboardData } = useDashboard()
+  const liveIncome = Number(dashboardData?.cards?.income?.value) || 0
+  const liveExpense = Number(dashboardData?.cards?.expenses?.value) || 0
+  const liveSavings = Number(dashboardData?.cards?.savings?.value) || 0
+  const liveNetWorth = Number(dashboardData?.cards?.net_worth?.value) || 0
+  const [dateRange, setDateRange] = useState(() => localStorage.getItem('finbridge_forecast_range') || "Last 6 Months (May - Oct 2024)")
 
   // AI Forecast Chat Popup State (Requirement 4)
   const [showAiChat, setShowAiChat] = useState(false)
-  const [chatInput, setChatInput] = useState('')
+  const [chatInput, setChatInput] = useState(() => localStorage.getItem('finbridge_forecast_chat_draft') || '')
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [chatMessages, setChatMessages] = useState([
     {
       sender: 'ai',
-      text: "Hello! I am FinScope AI, your forecasting and financial strategy copilot. I've analyzed your 6-month trajectory and Health Radar (Score: 82/100). How can I assist you with projections or milestone optimization?"
+      text: "Hello! I am FinScope AI, your forecasting and financial strategy copilot. Add your financial data to receive projections and milestone analysis."
     }
   ])
   const chatBottomRef = useRef(null)
+
+  useEffect(() => localStorage.setItem('finbridge_forecast_range', dateRange), [dateRange])
+  useEffect(() => localStorage.setItem('finbridge_forecast_chat_draft', chatInput), [chatInput])
 
   useEffect(() => {
     if (showAiChat) {
@@ -105,31 +79,40 @@ export default function Forecast() {
 
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:8000/api/v1/assistant/chat', {
+      const res = await fetch(`${API}/api/ai/ask`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
-          message: `[Financial Forecast Context: Income 7,20,000, Expenses 4,10,000, Savings 3,10,000, Radar Score 82/100, Growth pillar 70, Bike Goal 1,20,000 due Nov 2024] User Question: ${textToSend}`
+          question: textToSend,
+          context: {
+            user_name: 'User',
+            total_income: liveIncome,
+            total_expense: liveExpense,
+            savings_rate: liveIncome > 0 ? Math.round((liveSavings / liveIncome) * 100) : 0,
+            categories: []
+          }
         })
       })
 
       if (res.ok) {
         const data = await res.json()
-        const aiReply = data.reply || data.response || data.message || "Based on your 6-month forecast, increasing your monthly equity SIP by ₹5,000 will improve your Growth pillar from 70 to 88 while comfortably meeting your upcoming obligations."
+        const aiReply = data.answer || data.reply || data.response || data.message || "Add live income, expense, debt, and goal data before requesting a forecast recommendation."
         setChatMessages(prev => [...prev, { sender: 'ai', text: aiReply }])
       } else {
         throw new Error('API request failed')
       }
     } catch {
       // Smart contextual fallback
-      let fallback = "Based on your 6-month cashflow velocity, your net savings rate is a healthy 43%. To elevate your Growth score from 70 to 85+, channel ₹8,000/month into diversified index funds and short-term debt instruments."
+      let fallback = liveIncome > 0
+        ? "Based on your live financial data, review your current income, expenses, savings, and debt before making a forecast. Add more transaction history for a more accurate projection."
+        : "Add your income and expense transactions first so I can produce a forecast from your data."
       if (textToSend.toLowerCase().includes('bike') || textToSend.toLowerCase().includes('goal')) {
-        fallback = "Your Bike Purchase Goal (₹1,20,000 by Nov 2024) is on track! With projected monthly savings of ₹55,000 to ₹65,000, you will exceed the target threshold by an estimated 18 days."
+        fallback = "Add a real goal target and target date first. I will calculate the required monthly savings from your live data."
       } else if (textToSend.toLowerCase().includes('growth') || textToSend.toLowerCase().includes('pillar')) {
-        fallback = "Your Growth pillar is currently at 70/100 because high liquidity is parked in low-yield savings. Rebalancing 25% of surplus cash into sovereign bonds or broad-market index ETFs will achieve optimal radar symmetry."
+        fallback = "A growth recommendation requires live investment and cash-flow data. Add your financial profile and transactions before adjusting allocations."
       }
       setChatMessages(prev => [...prev, { sender: 'ai', text: fallback }])
     } finally {
@@ -147,11 +130,11 @@ export default function Forecast() {
         [''],
         ['1. EXECUTIVE SUMMARY METRICS'],
         ['Metric', 'Amount (INR)', 'Performance vs Previous Period'],
-        ['Total Income', '720000', '+12.5% vs previous 6 months'],
-        ['Total Expenses', '410000', '+8.3% vs previous 6 months'],
-        ['Net Savings', '310000', '+18.7% vs previous 6 months'],
-        ['Debt Portfolio', '380000', '-4.2% vs previous 6 months (Reduced)'],
-        ['Financial Health Score', '82 / 100', 'Optimal Balance'],
+        ['Total Income', String(liveIncome), 'Live data'],
+        ['Total Expenses', String(liveExpense), 'Live data'],
+        ['Net Savings', String(liveSavings), 'Live data'],
+        ['Debt Portfolio', String(liveNetWorth), 'Live data'],
+        ['Financial Health Score', String(dashboardData?.health?.score ?? 0), dashboardData?.health?.label || 'No data'],
         [''],
         ['2. MONTHLY CASH FLOW & SAVINGS TRAJECTORY'],
         ['Month', 'Income (INR)', 'Expenses (INR)', 'Savings (INR)'],
@@ -161,7 +144,7 @@ export default function Forecast() {
         ['Category', 'Volume (INR)', 'Share (%)'],
         ...breakdownData.map(b => [b.name, b.value, `${b.percent}%`]),
         [''],
-        ['4. FINANCIAL HEALTH RADAR PILLARS (82/100)'],
+        ['4. FINANCIAL HEALTH RADAR PILLARS'],
         ['Core Pillar', 'Score (out of 100)'],
         ...radarData.map(r => [r.subject, `${r.A}/100`]),
         [''],
@@ -229,11 +212,11 @@ export default function Forecast() {
         startY: 42,
         head: [['Metric', 'Amount (INR)', 'Performance vs Prev 6 Mo']],
         body: [
-          ['Total Income', 'Rs 7,20,000', '+12.5%'],
-          ['Total Expenses', 'Rs 4,10,000', '+8.3%'],
-          ['Net Savings', 'Rs 3,10,000', '+18.7%'],
-          ['Debt Portfolio', 'Rs 3,80,000', '-4.2% (Reduced)'],
-          ['Financial Health Radar Score', '82 / 100', 'Optimized Symmetry']
+          ['Total Income', `Rs ${liveIncome.toLocaleString('en-IN')}`, 'Live data'],
+          ['Total Expenses', `Rs ${liveExpense.toLocaleString('en-IN')}`, 'Live data'],
+          ['Net Savings', `Rs ${liveSavings.toLocaleString('en-IN')}`, 'Live data'],
+          ['Debt Portfolio', `Rs ${liveNetWorth.toLocaleString('en-IN')}`, 'Live data'],
+          ['Financial Health Radar Score', String(dashboardData?.health?.score ?? 0), dashboardData?.health?.label || 'No data']
         ],
         theme: 'striped',
         headStyles: { fillColor: [13, 148, 136] }, // teal-600
@@ -359,7 +342,7 @@ export default function Forecast() {
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Total Income</div>
-          <div className="mt-1 text-2xl font-bold">₹7,20,000</div>
+          <div className="mt-1 text-2xl font-bold">{inr(liveIncome)}</div>
           <div className="mt-1 flex items-center text-xs font-semibold text-teal-500">
             <ArrowUpRight size={14} className="mr-0.5" /> 12.5% <span className="ml-1 font-normal text-slate-400">vs last 6 months</span>
           </div>
@@ -367,7 +350,7 @@ export default function Forecast() {
         </div>
         <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Total Expenses</div>
-          <div className="mt-1 text-2xl font-bold">₹4,10,000</div>
+          <div className="mt-1 text-2xl font-bold">{inr(liveExpense)}</div>
           <div className="mt-1 flex items-center text-xs font-semibold text-rose-500">
             <ArrowUpRight size={14} className="mr-0.5" /> 8.3% <span className="ml-1 font-normal text-slate-400">vs last 6 months</span>
           </div>
@@ -375,7 +358,7 @@ export default function Forecast() {
         </div>
         <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Total Savings</div>
-          <div className="mt-1 text-2xl font-bold">₹3,10,000</div>
+          <div className="mt-1 text-2xl font-bold">{inr(liveSavings)}</div>
           <div className="mt-1 flex items-center text-xs font-semibold text-indigo-500">
             <ArrowUpRight size={14} className="mr-0.5" /> 18.7% <span className="ml-1 font-normal text-slate-400">vs last 6 months</span>
           </div>
@@ -383,7 +366,7 @@ export default function Forecast() {
         </div>
         <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-400">Debt Overview</div>
-          <div className="mt-1 text-2xl font-bold">₹3,80,000</div>
+          <div className="mt-1 text-2xl font-bold">{inr(liveNetWorth)}</div>
           <div className="mt-1 flex items-center text-xs font-semibold text-teal-500">
             <ArrowDownRight size={14} className="mr-0.5" /> 4.2% <span className="ml-1 font-normal text-slate-400">vs last 6 months</span>
           </div>
@@ -623,7 +606,7 @@ export default function Forecast() {
             {/* Quick Strategy Prompt Chips */}
             <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex gap-1.5 overflow-x-auto no-scrollbar bg-slate-50/50 dark:bg-slate-800/40">
               {[
-                'How to optimize Growth pillar (Score 70)?',
+                'How can I improve my financial growth pillar?',
                 'Will savings cover the ₹1,20,000 Bike Goal?',
                 'Strategies for inflation & interest rates'
               ].map((chip, idx) => (

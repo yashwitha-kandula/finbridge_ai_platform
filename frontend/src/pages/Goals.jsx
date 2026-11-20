@@ -5,9 +5,10 @@ import {
   TrendingUp, Settings, ArrowUpSquare, ChevronDown, Percent,
   Sparkles, MessageSquare, Send, X, Bot, User
 } from 'lucide-react'
+import { authFetch } from '../lib/api'
 import Modal, { FormField, fieldCls } from '../components/Modal'
-import { API } from '../lib/api'
 import { useNotification } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext'
 
 // Simple Toggle Component
 const Toggle = ({ enabled, onChange }) => (
@@ -19,24 +20,48 @@ const Toggle = ({ enabled, onChange }) => (
   </div>
 )
 
+const EMPTY_GOAL_FORM = {
+ name: '',
+ category: '',
+ priority: 'Medium',
+ targetAmount: '',
+ currentSavings: '',
+ targetDate: '',
+ description: '',
+ monthlySave: '',
+ expectedReturn: '',
+ includeInvestment: true,
+ reviewProgress: 'Monthly',
+ reminder: '1st of every month',
+ autoAdjust: true
+}
+
+const getSavedIncomeSnapshot = () => {
+  const read = (key) => {
+    try { return JSON.parse(localStorage.getItem(key) || '{}') || {} } catch { return {} }
+  }
+  const primary = read('finbridge_income_primary')
+  const additional = read('finbridge_income_additional')
+  const sources = [
+    { name: 'Primary salary', amount: Number(primary.monthly) || 0 },
+    { name: 'Freelance / side income', amount: additional.freelance ? Number(additional.freelanceAmt) || 0 : 0 },
+    { name: additional.otherType || 'Other income', amount: additional.other ? Number(additional.otherAmt) || 0 : 0 }
+  ].filter(source => source.amount > 0)
+  return { total: sources.reduce((sum, source) => sum + source.amount, 0), sources }
+}
+
 export default function Goals() {
   const { notify } = useNotification()
+  const { token, user } = useAuth()
   const [toast, setToast] = useState(null)
+  const [dashboardData, setDashboardData] = useState(null)
+  const [savedGoals, setSavedGoals] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('finbridge_goals') || '[]') } catch { return [] }
+  })
   
-  const [form, setForm] = useState({
-    name: 'Buy a Car',
-    category: 'Vehicle Purchase',
-    priority: 'High',
-    targetAmount: '1200000',
-    currentSavings: '150000',
-    targetDate: '2026-05-01',
-    description: 'Planning to buy a mid-range car for daily commute.',
-    monthlySave: '25000',
-    expectedReturn: '6',
-    includeInvestment: true,
-    reviewProgress: 'Monthly',
-    reminder: '1st of every month',
-    autoAdjust: true
+  const [form, setForm] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('finbridge_goal_draft')) || EMPTY_GOAL_FORM }
+    catch { return EMPTY_GOAL_FORM }
   })
 
   // AI Goal Chat State
@@ -50,6 +75,28 @@ export default function Goals() {
   ])
   const [isAiLoading, setIsAiLoading] = useState(false)
   const chatBottomRef = useRef(null)
+  const savedIncome = getSavedIncomeSnapshot()
+  const trackedIncome = Number(dashboardData?.cards?.income?.value) || 0
+  const monthlyIncome = trackedIncome || savedIncome.total
+  const monthlyExpense = Number(dashboardData?.breakdown?.total ?? dashboardData?.cards?.expenses?.value) || 0
+  const incomeSources = savedIncome.sources.length > 0
+    ? savedIncome.sources
+    : trackedIncome > 0 ? [{ name: 'Tracked income', amount: trackedIncome }] : []
+
+  useEffect(() => {
+    if (!token) return
+    let active = true
+    authFetch(token, '/api/dashboard?breakdown=this_month')
+      .then(data => {
+        if (active) setDashboardData(data)
+      })
+      .catch(err => console.error('Failed to load financial context for goal advisor', err))
+    return () => { active = false }
+  }, [token])
+
+  useEffect(() => {
+    localStorage.setItem('finbridge_goal_draft', JSON.stringify(form))
+  }, [form])
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -65,13 +112,25 @@ export default function Goals() {
     setIsAiLoading(true)
 
     try {
-      const res = await fetch(`${API}/api/ai/ask`, {
+      const data = await authFetch(token, '/api/ai/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: q,
           context: {
-            user_name: 'Investor',
+            user_name: user?.full_name || 'User',
+            currency: user?.currency || 'INR (₹)',
+            total_income: monthlyIncome,
+            declared_monthly_income: savedIncome.total,
+            income_sources: incomeSources,
+            total_expense: monthlyExpense,
+            savings_rate: monthlyIncome > 0
+              ? Math.round(((monthlyIncome - monthlyExpense) / monthlyIncome) * 1000) / 10
+              : 0,
+            categories: dashboardData?.breakdown?.items?.map(item => ({
+              name: item.name,
+              value: Number(item.amount) || 0
+            })) || [],
+            has_data: Boolean(dashboardData?.has_data || savedIncome.total),
             goal_name: form.name,
             target_amount: targetAmt,
             current_savings: currSave,
@@ -81,15 +140,14 @@ export default function Goals() {
           }
         })
       })
-      const data = await res.json()
-      const answer = data.answer || 'Consider increasing monthly investments in diversified equity index funds to reach your target comfortably.'
+      const answer = data.answer || 'I could not generate a goal-specific answer. Please try again.'
       setChatMessages((prev) => [...prev, { sender: 'ai', text: answer }])
-    } catch {
+    } catch (err) {
       setChatMessages((prev) => [
         ...prev,
         {
           sender: 'ai',
-          text: `For ${form.name} (Target: ₹${targetAmt.toLocaleString()}), saving ₹${Math.round(monthlyNeeded).toLocaleString()}/month across Index Funds (12%) and Liquid Funds (6%) will help you achieve the goal on schedule.`
+          text: `I couldn't reach the financial advisor: ${err.message}. Please try again.`
         }
       ])
     } finally {
@@ -148,8 +206,37 @@ export default function Goals() {
     }
   }, [toast])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name || !form.targetAmount) {
+      const goal = {
+        id: Date.now(),
+        name: form.name,
+        category: form.category,
+        targetAmount: targetAmt,
+        currentSavings: currSave,
+        targetDate: form.targetDate
+      }
+      const updated = [goal, ...savedGoals]
+      setSavedGoals(updated)
+      localStorage.setItem('finbridge_goals', JSON.stringify(updated))
+      try {
+        await authFetch(token, '/api/dashboard/goals', {
+          method: 'POST',
+          body: JSON.stringify({
+            goal_name: form.name,
+            goal_type: form.category,
+            target_amount: targetAmt,
+            current_amount: currSave,
+            target_date: form.targetDate || null,
+            priority: form.priority,
+            description: form.description
+          })
+        })
+        window.dispatchEvent(new Event('finbridge_data_changed'))
+      } catch (err) {
+        notify({ title: 'Saved Locally', message: err.message, type: 'error' })
+        return
+      }
       notify({
         title: 'Missing Goal Information',
         message: 'Please enter Goal Name and Target Amount.',
@@ -216,14 +303,16 @@ export default function Goals() {
                   <InputLabel text="Goal Category" required />
                   <div className="relative">
                     <Car size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input list="goal-categories" value={form.category} onChange={e => handleChange('category', e.target.value)} className={`${inputCls} pl-9`} placeholder="e.g. Vehicle Purchase" />
-                    <datalist id="goal-categories">
-                      <option value="Vehicle Purchase" />
-                      <option value="Home Down Payment" />
-                      <option value="Emergency Fund" />
-                      <option value="Retirement" />
-                      <option value="Vacation" />
-                    </datalist>
+                    <select value={form.category} onChange={e => handleChange('category', e.target.value)} className={`${inputCls} appearance-none pl-9 pr-8`}>
+                      <option value="">Select category</option>
+                      <option value="Vehicle Purchase">Vehicle Purchase</option>
+                      <option value="Home Down Payment">Home Down Payment</option>
+                      <option value="Emergency Fund">Emergency Fund</option>
+                      <option value="Retirement">Retirement</option>
+                      <option value="Vacation">Vacation</option>
+                      <option value="Education">Education</option>
+                      <option value="Other">Other</option>
+                    </select>
                     <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
